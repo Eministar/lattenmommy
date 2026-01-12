@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Starry Ticket Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">Starry Ticket Dashboard</div>
+      <div class="tokenBox">
+        <input id="token" type="password" placeholder="Dashboard Token (Bearer)">
+        <button id="saveToken">Speichern</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Settings (Overrides)</h2>
+        <p class="muted">Diese Werte überschreiben config.yml und wirken ohne Bot-Neustart.</p>
+        <textarea id="settings"></textarea>
+        <div class="row">
+          <button id="reload">Laden</button>
+          <button class="primary" id="apply">Anwenden</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Tickets</h2>
+        <div class="row">
+          <button id="ticketsReload">Aktualisieren</button>
+        </div>
+        <div id="tickets" class="tickets"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

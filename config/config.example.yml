@@ -1,0 +1,68 @@
+bot:
+  guild_id:
+  token: "0"
+  forum_channel_id:
+  log_forum_channel_id:
+  log_channel_id:
+  support_role_id:
+  staff_role_ids:
+  dashboard:
+    host: "0.0.0.0"
+    port: 8787
+    token: "change-me-now"
+
+
+logs:
+  enabled: true
+
+
+ticket:
+  default_category: "allgemeine_frage"
+  allow_multiple_open_tickets_per_user: false
+  rating_enabled: true
+  mirror_staff_attachments: true
+
+design:
+  accent_color: "#B16B91"
+  footer_text: "Starry Support"
+  status_open_text: "Offen"
+  status_claimed_text: "Geclaimed"
+  status_closed_text: "Geschlossen"
+
+emojis:
+  book: "book"
+  info: "info"
+  green: "green"
+  orange: "orange"
+  red: "red"
+  cursor: "cursor"
+  cursor2: "cursor2"
+  cursor3: "cursor3"
+  hearts: "hearts"
+  money: "money"
+  nerd: "nerd"
+  cheers: "cheers"
+  discord_love: "discord_love"
+
+categories:
+  allgemeine_frage:
+    label: "ALLGEMEINE FRAGE"
+    forum_tag_id: 0
+    thread_prefix: "•"
+  bug_report:
+    label: "BUG REPORT"
+    forum_tag_id: 0
+    thread_prefix: "•"
+
+texts:
+  dm_ticket_created_title: "📚 • SUPPORT-TICKET – BESTÄTIGUNG"
+  dm_ticket_created_desc: "Dein Ticket ist erstellt! Unser Team meldet sich hier per DM."
+  dm_mirrored_reply_title: "💬 • TEAM-ANTWORT"
+  dm_ticket_closed_title: "🔒 • TICKET GESCHLOSSEN"
+  dm_ticket_closed_desc: "Danke! Wenn du magst, bewerte kurz den Support."
+  dm_rating_thanks: "Danke für deine Bewertung! 💜"
+
+logging:
+  to_discord: true
+  to_file: true
+  file_path: "data/logs.jsonl"
