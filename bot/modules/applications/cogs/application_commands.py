@@ -52,7 +52,7 @@ class ApplicationCommands(commands.Cog):
         await self.service.start_dm_flow(interaction.user, interaction.guild)
         await interaction.response.send_message("Ich habe dir eine DM geschickt. Bitte beantworte dort die Fragen.", ephemeral=True)
 
-    application_panel = app_commands.Group(name="application-panel", description="📝 𑁉 Bewerbungs-Panel")
+    application_panel = app_commands.Group(name="applicationpanel", description="📝 𑁉 Bewerbungs-Panel")
 
     @application_panel.command(name="send", description="📝 𑁉 Bewerbungs-Panel senden")
     @app_commands.describe(channel="Zielkanal (optional)")

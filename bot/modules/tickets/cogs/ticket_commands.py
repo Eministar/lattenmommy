@@ -13,7 +13,7 @@ class TicketCommands(commands.Cog):
         self.service = getattr(bot, "ticket_service", None) or TicketService(bot, bot.settings, bot.db, bot.logger)
 
     ticket = app_commands.Group(name="ticket", description="🎫 𑁉 Ticket-Tools")
-    support_panel = app_commands.Group(name="support-panel", description="🛟 𑁉 Support-Panel")
+    support_panel = app_commands.Group(name="supportpanel", description="🛟 𑁉 Support-Panel")
 
     @ticket.command(name="beanspruchen", description="🧷 𑁉 Ticket claimen/freigeben")
     async def claim(self, interaction: discord.Interaction):
