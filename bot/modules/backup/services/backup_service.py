@@ -45,11 +45,14 @@ class BackupService:
         }
 
     def _sticker_payload(self, sticker: discord.Sticker):
+        tags = getattr(sticker, "tags", None)
+        if not tags:
+            tags = getattr(sticker, "emoji", None)
         return {
             "id": int(sticker.id),
             "name": sticker.name,
             "description": sticker.description,
-            "tags": sticker.tags,
+            "tags": tags,
             "format": str(sticker.format),
             "url": str(sticker.url),
         }
@@ -520,7 +523,7 @@ class BackupService:
                             await guild.create_sticker(
                                 name=sticker_data.get("name", "sticker"),
                                 description=sticker_data.get("description") or "—",
-                                tags=sticker_data.get("tags") or "🙂",
+                                tags=sticker_data.get("tags") or sticker_data.get("emoji") or "🙂",
                                 file=file,
                                 reason="Backup restore",
                             )
@@ -528,11 +531,12 @@ class BackupService:
                             pass
                 else:
                     try:
+                        current_tags = getattr(sticker, "tags", None) or getattr(sticker, "emoji", None)
                         await guild.edit_sticker(
                             sticker,
                             name=sticker_data.get("name", sticker.name),
                             description=sticker_data.get("description", sticker.description),
-                            tags=sticker_data.get("tags", sticker.tags),
+                            tags=sticker_data.get("tags", current_tags),
                             reason="Backup restore",
                         )
                     except Exception:

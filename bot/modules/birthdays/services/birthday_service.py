@@ -22,6 +22,29 @@ class BirthdayService:
         from bot.utils.emojis import em
         return em(self.settings, key, guild) or fallback
 
+    def _resolve_emoji(self, guild: discord.Guild | None, token: str | None) -> str:
+        from bot.utils.emojis import em
+        t = str(token or "").strip()
+        if not t:
+            return "🏆"
+        if t.startswith("<") and t.endswith(">"):
+            return t
+        key = t[1:-1] if t.startswith(":") and t.endswith(":") else t
+        resolved = em(self.settings, key, guild)
+        return resolved if resolved else t
+
+    def _embed_color(self, member: discord.Member | None) -> int:
+        try:
+            if member and int(member.color.value) != 0:
+                return int(member.color.value)
+        except Exception:
+            pass
+        v = str(self.settings.get_guild(member.guild.id, "design.accent_color", "#B16B91") or "").replace("#", "").strip()
+        try:
+            return int(v, 16)
+        except Exception:
+            return 0xB16B91
+
     async def set_birthday(self, interaction: discord.Interaction, day: int, month: int, year: int):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
@@ -73,6 +96,14 @@ class BirthdayService:
                     pass
 
     async def _grant_success(self, member: discord.Member):
+        await self._ensure_success_role(member)
+        code = "birthday_set"
+        await self.db.add_achievement(member.guild.id, member.id, code)
+        await self._grant_achievement_role(member, code)
+        await self._dm_achievement(member, code)
+        await self._ensure_birthday_role(member)
+
+    async def _ensure_success_role(self, member: discord.Member):
         role_id = self.settings.get_guild_int(member.guild.id, "birthday.success_role_id")
         if role_id:
             role = member.guild.get_role(role_id)
@@ -82,11 +113,25 @@ class BirthdayService:
                 except Exception:
                     pass
 
+    async def ensure_birthday_achievement(self, member: discord.Member) -> bool:
+        row = await self.db.get_birthday_global(member.id)
+        if not row:
+            return False
+        day, month, year = int(row[0]), int(row[1]), int(row[2])
+        await self._apply_age_roles(member, year)
+        await self._ensure_success_role(member)
+        await self._ensure_birthday_role(member)
+
         code = "birthday_set"
+        rows = await self.db.list_achievements(member.guild.id, member.id)
+        existing = {r[0] for r in rows}
+        if code in existing:
+            await self._grant_achievement_role(member, code)
+            return False
         await self.db.add_achievement(member.guild.id, member.id, code)
         await self._grant_achievement_role(member, code)
         await self._dm_achievement(member, code)
-        await self._ensure_birthday_role(member)
+        return True
 
     async def _ensure_birthday_role(self, member: discord.Member):
         role_id = self.settings.get_guild_int(member.guild.id, "birthday.role_id")
@@ -175,9 +220,25 @@ class BirthdayService:
         if not msg:
             return
         try:
-            await member.send(msg)
+            emb = self._achievement_dm_embed(member, payload, msg)
+            await member.send(embed=emb)
         except Exception:
             pass
+
+    def _achievement_dm_embed(self, member: discord.Member, item: dict, msg: str):
+        guild = member.guild if member and member.guild else None
+        cheers = self._emoji(guild, "cheers", "🎉")
+        arrow2 = self._emoji(guild, "arrow2", "»")
+        hearts = self._emoji(guild, "hearts", "💖")
+        emoji = self._resolve_emoji(guild, item.get("emoji", "🏆"))
+        title = f"{cheers} 𑁉 ERFOLG FREIGESCHALTET"
+        desc = (
+            f"{arrow2} {msg}\n\n"
+            f"┏`🏆` - Erfolg: {emoji} **{item.get('name', item.get('code', 'Erfolg'))}**\n"
+            f"┗`💜` - Du bist stark unterwegs! {hearts}"
+        )
+        emb = discord.Embed(title=title, description=desc, color=self._embed_color(member))
+        return emb
 
     async def announce_today(self, guild: discord.Guild):
         channel_id = self.settings.get_guild_int(guild.id, "birthday.channel_id")

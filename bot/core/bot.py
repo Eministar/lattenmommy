@@ -26,6 +26,7 @@ from bot.modules.polls.cogs.poll_commands import PollCommands
 from bot.modules.polls.services.poll_service import PollService
 from bot.modules.news.cogs.news_commands import NewsCommands
 from bot.modules.news.services.news_service import NewsService
+from bot.modules.placeholders.services.placeholder_service import PlaceholderService
 
 from bot.modules.moderation.cogs.moderation_commands import ModerationCommands  
 from bot.modules.logs.cogs.modlog_listener import ModLogListener
@@ -73,6 +74,7 @@ class StarryBot(commands.Bot):
         self.tempvoice_service = TempVoiceService(self, self.settings, self.db, self.logger)
         self.news_service = NewsService(self, self.settings, self.db, self.logger)
         self.application_service = ApplicationService(self, self.settings, self.db, self.logger)
+        self.placeholder_service = PlaceholderService(self, self.settings, self.db, self.logger)
 
         self.forum_logs = ForumLogService(self, self.settings, self.db)
         self._boot_done = False
@@ -83,6 +85,7 @@ class StarryBot(commands.Bot):
         self.birthday_loop.start()
         self.giveaway_loop.start()
         self.news_loop.start()
+        self.placeholder_loop.start()
 
     async def setup_hook(self):
         await self.add_cog(TicketDMListener(self))
@@ -179,6 +182,16 @@ class StarryBot(commands.Bot):
         except Exception:
             pass
 
+    @tasks.loop(seconds=60.0)
+    async def placeholder_loop(self):
+        try:
+            if not self.placeholder_service:
+                return
+            for guild in list(self.guilds):
+                await self.placeholder_service.tick(guild)
+        except Exception:
+            pass
+
     @reload_settings_loop.error
     async def reload_settings_loop_error(self, error: Exception):
             await self._emit_bot_error("reload_settings_loop", error, extra=None, guild=None)
@@ -202,6 +215,10 @@ class StarryBot(commands.Bot):
     @news_loop.error
     async def news_loop_error(self, error: Exception):
             await self._emit_bot_error("news_loop", error, extra=None, guild=None)
+
+    @placeholder_loop.error
+    async def placeholder_loop_error(self, error: Exception):
+            await self._emit_bot_error("placeholder_loop", error, extra=None, guild=None)
 
     async def on_ready(self):
         if self._boot_done:

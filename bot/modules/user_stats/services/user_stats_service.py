@@ -102,7 +102,40 @@ class UserStatsService:
             return
         await self._ensure_level_roles(guild)
         await self._ensure_achievement_roles(guild)
-        await self._sort_managed_roles(guild)
+        if bool(self.settings.get_guild(guild.id, "user_stats.auto_sort_roles", False)):
+            await self._sort_managed_roles(guild)
+
+    async def rescan_guild(self, guild: discord.Guild, birthday_service=None) -> dict:
+        scanned = 0
+        new_achievements = 0
+        new_birthday = 0
+        if not guild:
+            return {"scanned": 0, "achievements_new": 0, "birthday_new": 0}
+        for member in guild.members:
+            if member.bot:
+                continue
+            scanned += 1
+            await self.db.upsert_user_stats(guild.id, member.id)
+            row = await self.db.get_user_stats(guild.id, member.id)
+            if not row:
+                continue
+            stats = self._row_to_stats(row)
+            await self._sync_level(member, stats, announce=False)
+            await self._evaluate_rules(member, stats)
+            before_rows = await self.db.list_achievements(guild.id, member.id)
+            before = {r[0] for r in before_rows}
+            await self._check_achievements(member, stats)
+            if birthday_service:
+                try:
+                    added = await birthday_service.ensure_birthday_achievement(member)
+                    if added:
+                        new_birthday += 1
+                except Exception:
+                    pass
+            after_rows = await self.db.list_achievements(guild.id, member.id)
+            after = {r[0] for r in after_rows}
+            new_achievements += len(after - before)
+        return {"scanned": scanned, "achievements_new": new_achievements, "birthday_new": new_birthday}
 
     async def _ensure_level_roles(self, guild: discord.Guild):
         raw = self.settings.get_guild(guild.id, "user_stats.level_roles", {}) or {}
@@ -445,14 +478,15 @@ class UserStatsService:
             await self._evaluate_rules(member, stats)
             await self._check_achievements(member, stats)
 
-    async def _sync_level(self, member: discord.Member, stats: dict):
+    async def _sync_level(self, member: discord.Member, stats: dict, announce: bool = True):
         xp = int(stats.get("xp", 0))
         current_level = int(stats.get("level", 0))
         new_level = self._level_for_xp(xp)
         if new_level > current_level:
             await self.db.set_user_level(member.guild.id, member.id, new_level)
             stats["level"] = new_level
-            await self._post_levelup(member, new_level, xp)
+            if announce:
+                await self._post_levelup(member, new_level, xp)
 
     def _row_to_stats(self, row):
         return {
