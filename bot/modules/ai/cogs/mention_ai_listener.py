@@ -31,9 +31,14 @@ class MentionAIListener(commands.Cog):
         prompt = self.service.clean_prompt(self.bot.user.id, message.content)
         if not prompt:
             return
+        if not self.service.can_consume(message.guild.id, message.author.id):
+            await message.reply("Dein Tageslimit (20) ist erreicht.", mention_author=False)
+            return
+        self.service.consume(message.guild.id, message.author.id)
+        messages = self.service.build_messages(message.guild.id, message.author.id, prompt)
 
         async with message.channel.typing():
-            reply, err = await self.service.generate_reply(message.guild.id, prompt)
+            reply, err = await self.service.generate_reply(message.guild.id, messages)
 
         if err:
             await message.reply("Konnte gerade nicht antworten.", mention_author=False)
@@ -41,4 +46,5 @@ class MentionAIListener(commands.Cog):
         if not reply:
             return
 
+        self.service._set_session(message.guild.id, message.author.id, prompt, reply)
         await message.reply(reply, mention_author=False)

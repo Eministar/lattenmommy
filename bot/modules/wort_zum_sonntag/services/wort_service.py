@@ -116,27 +116,8 @@ class WortZumSonntagService:
 
         if forum:
             await self.settings.set_guild_override(self.db, guild.id, "wzs.forum_channel_id", int(forum.id))
-
-        await self._ensure_info_thread(guild, forum_channel)
-
-        panel_view = WortPanelView(self, guild)
-        panel_thread_id = self._gi(guild.id, "wzs.panel_thread_id", 0)
-        panel_message_id = self._gi(guild.id, "wzs.panel_message_id", 0)
-
-        if panel_thread_id and panel_message_id:
-            thread = await self._get_thread(guild, panel_thread_id)
-            if thread:
-                try:
-                    msg = await thread.fetch_message(int(panel_message_id))
-                    await msg.edit(view=panel_view)
-                    return await interaction.response.send_message("Panel aktualisiert.", ephemeral=True)
-                except Exception:
-                    pass
-
-        res = await forum_channel.create_thread(name=self._panel_thread_name(guild.id), view=panel_view)
-        await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_thread_id", int(res.thread.id))
-        await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_message_id", int(res.message.id))
-        await interaction.response.send_message("Panel gesendet.", ephemeral=True)
+        await self._ensure_main_thread(guild, forum_channel)
+        await interaction.response.send_message("Info + Panel aktualisiert.", ephemeral=True)
 
     async def submit_wisdom(self, interaction: discord.Interaction, content: str):
         if not interaction.guild or not interaction.user:
@@ -243,24 +224,51 @@ class WortZumSonntagService:
             ch = None
         return ch if isinstance(ch, discord.Thread) else None
 
-    async def _ensure_info_thread(self, guild: discord.Guild, forum: discord.ForumChannel):
+    async def _ensure_main_thread(self, guild: discord.Guild, forum: discord.ForumChannel):
+        panel_thread_id = self._gi(guild.id, "wzs.panel_thread_id", 0)
         info_thread_id = self._gi(guild.id, "wzs.info_thread_id", 0)
-        info_message_id = self._gi(guild.id, "wzs.info_message_id", 0)
-        if info_thread_id:
-            existing = await self._get_thread(guild, info_thread_id)
-            if existing:
-                try:
-                    msg_id = int(info_message_id) if info_message_id else int(existing.id)
-                    msg = await existing.fetch_message(msg_id)
-                    await msg.edit(view=WortInfoView(self, guild))
-                except Exception:
-                    pass
-                return
+        thread_id = panel_thread_id or info_thread_id
+        thread = await self._get_thread(guild, thread_id) if thread_id else None
 
+        if not thread:
+            info_view = WortInfoView(self, guild)
+            res = await forum.create_thread(name=self._panel_thread_name(guild.id), view=info_view)
+            thread = res.thread
+            await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_thread_id", int(thread.id))
+            await self.settings.set_guild_override(self.db, guild.id, "wzs.info_thread_id", int(thread.id))
+            await self.settings.set_guild_override(self.db, guild.id, "wzs.info_message_id", int(res.message.id))
+
+            panel_view = WortPanelView(self, guild)
+            panel_msg = await thread.send(view=panel_view)
+            await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_message_id", int(panel_msg.id))
+            return
+
+        await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_thread_id", int(thread.id))
+        await self.settings.set_guild_override(self.db, guild.id, "wzs.info_thread_id", int(thread.id))
+
+        info_message_id = self._gi(guild.id, "wzs.info_message_id", 0)
         info_view = WortInfoView(self, guild)
-        res = await forum.create_thread(name=self._info_thread_name(guild.id), view=info_view)
-        await self.settings.set_guild_override(self.db, guild.id, "wzs.info_thread_id", int(res.thread.id))
-        await self.settings.set_guild_override(self.db, guild.id, "wzs.info_message_id", int(res.message.id))
+        if info_message_id:
+            try:
+                msg = await thread.fetch_message(int(info_message_id))
+                await msg.edit(view=info_view)
+            except Exception:
+                info_message_id = 0
+        if not info_message_id:
+            msg = await thread.send(view=info_view)
+            await self.settings.set_guild_override(self.db, guild.id, "wzs.info_message_id", int(msg.id))
+
+        panel_message_id = self._gi(guild.id, "wzs.panel_message_id", 0)
+        panel_view = WortPanelView(self, guild)
+        if panel_message_id:
+            try:
+                msg = await thread.fetch_message(int(panel_message_id))
+                await msg.edit(view=panel_view)
+            except Exception:
+                panel_message_id = 0
+        if not panel_message_id:
+            msg = await thread.send(view=panel_view)
+            await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_message_id", int(msg.id))
 
     async def _refresh_submission_message(self, guild: discord.Guild, submission_id: int):
         row = await self.db.get_wzs_submission(int(submission_id))
