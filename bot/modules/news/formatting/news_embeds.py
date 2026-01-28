@@ -98,7 +98,7 @@ def build_news_view(settings, guild: discord.Guild | None, item: NewsItem, ping_
     meta = [f"┏`📰` - Quelle: **{item.source}**"]
     if item.published_at:
         meta.append(f"┣`🗓️` - {format_dt(item.published_at, style='f')}")
-    meta.append(f"┗`🔗` - Link: {item.url}")
+    meta.append("┗`🔗` - Mehr: Button unten")
 
     view = discord.ui.LayoutView(timeout=None)
     container = discord.ui.Container(accent_colour=_color(settings, guild))
@@ -143,6 +143,18 @@ def build_news_view(settings, guild: discord.Guild | None, item: NewsItem, ping_
         footer += f" • Abos: **{subs}**"
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(footer))
+
+    if item.url:
+        row = discord.ui.ActionRow()
+        row.add_item(
+            discord.ui.Button(
+                label="Artikel öffnen" if not item.video_id else "Video öffnen",
+                style=discord.ButtonStyle.link,
+                url=item.url,
+                emoji="🔗",
+            )
+        )
+        container.add_item(row)
 
     view.add_item(container)
     return view
