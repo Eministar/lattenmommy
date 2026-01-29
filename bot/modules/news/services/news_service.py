@@ -424,7 +424,11 @@ class NewsService:
         return m.group(1) if m else None
 
     async def _resolve_channel_id_from_page(self, url: str) -> str | None:
-        html = await self._fetch_text(str(url))
+        target = str(url)
+        if "youtube.com" in target and "ucbcb=1" not in target:
+            joiner = "&" if "?" in target else "?"
+            target = f"{target}{joiner}ucbcb=1"
+        html = await self._fetch_text(target)
         if not html:
             return None
         m = _YT_CHANNEL_RE.search(html) or _YT_EXTERNAL_RE.search(html)
@@ -457,7 +461,7 @@ class NewsService:
         if cached and (time.time() - cached[1]) < 21600:
             return f"https://www.youtube.com/feeds/videos.xml?channel_id={cached[0]}"
 
-        url = f"https://www.youtube.com/@{handle}"
+        url = f"https://www.youtube.com/@{handle}?ucbcb=1"
         html = await self._fetch_text(url)
         if not html:
             return None
@@ -639,8 +643,11 @@ class NewsService:
 
     async def _fetch_text(self, url: str) -> str | None:
         try:
+            headers = {"User-Agent": "StarryBot/1.0"}
+            if "youtube.com" in url or "youtu.be" in url:
+                headers = {"User-Agent": "Mozilla/5.0"}
             async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-                resp = await client.get(url, headers={"User-Agent": "StarryBot/1.0"})
+                resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
                 return resp.text
         except Exception:
