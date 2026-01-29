@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import ast
 import re
+import math
+import operator as op
 from dataclasses import dataclass
 
 import discord
@@ -15,7 +17,37 @@ from bot.modules.counting.formatting.counting_embeds import (
 )
 
 
-_ALLOWED_CHARS = re.compile(r"^[0-9+\-*/\s()]+$")
+_ALLOWED_CHARS = re.compile(r"^[0-9A-Za-z_.,+\-*/%^()\s]+$")
+_ALLOWED_FUNCS: dict[str, object] = {
+    "abs": abs,
+    "round": round,
+    "floor": math.floor,
+    "ceil": math.ceil,
+    "sqrt": math.sqrt,
+    "pow": pow,
+    "sin": math.sin,
+    "cos": math.cos,
+    "tan": math.tan,
+    "log": math.log,
+    "log10": math.log10,
+}
+_ALLOWED_CONSTS: dict[str, float] = {
+    "pi": math.pi,
+    "e": math.e,
+}
+_BIN_OPS: dict[type[ast.AST], object] = {
+    ast.Add: op.add,
+    ast.Sub: op.sub,
+    ast.Mult: op.mul,
+    ast.Div: op.truediv,
+    ast.FloorDiv: op.floordiv,
+    ast.Mod: op.mod,
+    ast.Pow: op.pow,
+}
+_UNARY_OPS: dict[type[ast.AST], object] = {
+    ast.UAdd: op.pos,
+    ast.USub: op.neg,
+}
 
 
 @dataclass
@@ -85,45 +117,68 @@ class CountingService:
         if isinstance(node, ast.Expression):
             return self._eval_ast(node.body)
 
-        if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
             return node.value
 
+        if isinstance(node, ast.Name):
+            return _ALLOWED_CONSTS.get(node.id)
+
         if isinstance(node, ast.UnaryOp):
-            if isinstance(node.op, ast.UAdd):
-                return self._eval_ast(node.operand)
-            return None
+            fn = _UNARY_OPS.get(type(node.op))
+            if not fn:
+                return None
+            val = self._eval_ast(node.operand)
+            if val is None:
+                return None
+            return fn(val)
 
         if isinstance(node, ast.BinOp):
+            fn = _BIN_OPS.get(type(node.op))
+            if not fn:
+                return None
             left = self._eval_ast(node.left)
             right = self._eval_ast(node.right)
             if left is None or right is None:
                 return None
-            if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                if right == 0:
-                    return None
-                return left // right
-            return None
+            if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
+                return None
+            return fn(left, right)
+
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                return None
+            fn = _ALLOWED_FUNCS.get(node.func.id)
+            if not fn or node.keywords:
+                return None
+            args = [self._eval_ast(arg) for arg in node.args]
+            if any(arg is None for arg in args):
+                return None
+            try:
+                return fn(*args)
+            except Exception:
+                return None
 
         return None
 
     def evaluate_expression(self, content: str) -> int | None:
         try:
-            expr = content.replace(" ", "")
+            expr = content.replace(" ", "").replace("^", "**").replace(",", ".")
             node = ast.parse(expr, mode="eval")
             value = self._eval_ast(node)
             if value is None:
                 return None
-            if not isinstance(value, int):
+            if isinstance(value, bool):
                 return None
-            if value < 0:
+            if not isinstance(value, (int, float)):
                 return None
-            return value
+            if not math.isfinite(value):
+                return None
+            rounded = int(round(value))
+            if abs(value - rounded) > 1e-9:
+                return None
+            if rounded < 0:
+                return None
+            return rounded
         except Exception:
             return None
 
@@ -237,14 +292,10 @@ class CountingService:
 
             if not self._allow_consecutive(guild_id):
                 if state.last_user_id and int(state.last_user_id) == int(message.author.id):
-                    await self._handle_fail(
-                        message,
-                        state,
-                        guild_id,
-                        reason="Du darfst nicht zweimal hintereinander zaehlen!",
-                        expected=state.current_number,
-                        got=None,
-                    )
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
                     return
 
             value = self.evaluate_expression(content)
