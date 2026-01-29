@@ -30,6 +30,7 @@ from bot.modules.placeholders.services.placeholder_service import PlaceholderSer
 from bot.modules.welcome.cogs.welcome_listener import WelcomeListener
 from bot.modules.welcome.services.welcome_service import WelcomeService
 from bot.modules.ai.cogs.mention_ai_listener import MentionAIListener
+from bot.modules.ai.cogs.ai_commands import AICommands
 from bot.modules.ai.services.deepseek_service import DeepSeekService
 from bot.modules.counting.cogs.counting_listener import CountingListener
 from bot.modules.counting.services.counting_service import CountingService
@@ -120,6 +121,7 @@ class StarryBot(commands.Bot):
         await self.add_cog(NewsCommands(self))
         await self.add_cog(WelcomeListener(self))
         await self.add_cog(MentionAIListener(self))
+        await self.add_cog(AICommands(self))
         await self.add_cog(CountingListener(self))
         await self.add_cog(WortCommands(self))
 

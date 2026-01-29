@@ -30,14 +30,15 @@ class MentionAIListener(commands.Cog):
             return
 
         prompt = self.service.clean_prompt(self.bot.user.id, message.content)
+        persona, prompt = self.service.extract_persona(prompt)
         if not prompt:
             return
         if not self.service.can_consume(message.guild.id, message.author.id):
-            view = build_limit_view(self.bot.settings, message.guild, 20)
+            view = build_limit_view(self.bot.settings, message.guild, self.service.daily_limit())
             await message.reply(view=view, mention_author=False)
             return
         self.service.consume(message.guild.id, message.author.id)
-        messages = self.service.build_messages(message.guild.id, message.author.id, prompt)
+        messages = self.service.build_messages(message.guild.id, message.author.id, prompt, persona=persona)
 
         async with message.channel.typing():
             reply, err = await self.service.generate_reply(message.guild.id, messages)

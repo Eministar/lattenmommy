@@ -8,10 +8,21 @@ import discord
 
 
 _MENTION_RE = re.compile(r"<@!?\d+>")
+_PERSONA_RE = re.compile(r"\[([^\]]+)\]")
 _MAX_REPLY_CHARS = 500
 _CHEAPEST_MODEL = "deepseek-chat"
 _DAILY_LIMIT = 20
 _SESSION_TTL_SECONDS = 300
+
+_PERSONAS: dict[str, str] = {
+    "basic": "Du bist hilfreich, klar und freundlich. Antworte kurz, direkt und auf Deutsch.",
+    "sauer": "Du bist genervt und leicht gereizt, aber bleibst verständlich. Antworte auf Deutsch.",
+    "provokant": "Du bist provokant, frech und direkt, aber ohne echte Drohungen. Antworte auf Deutsch.",
+    "beleidigend": "Du bist beleidigend und respektlos, ohne Gewaltaufrufe. Antworte auf Deutsch.",
+    "verschwörerisch": "Du klingst verschwörerisch und mysteriös, als würdest du Insiderwissen haben. Antworte auf Deutsch.",
+    "papperplatte": "Du sprichst locker, flapsig und ein bisschen albern, wie ein Streamer. Antworte auf Deutsch.",
+    "papaplatte": "Du sprichst locker, flapsig und ein bisschen albern, wie ein Streamer. Antworte auf Deutsch.",
+}
 
 
 class DeepSeekService:
@@ -77,10 +88,14 @@ class DeepSeekService:
             "last_at": time.time(),
         }
 
-    def build_messages(self, guild_id: int, user_id: int, prompt: str) -> list[dict]:
+    def build_messages(self, guild_id: int, user_id: int, prompt: str, persona: str | None = None) -> list[dict]:
         system_prompt = self._system_prompt(guild_id)
         messages: list[dict] = []
-        if system_prompt:
+        persona_prompt = _PERSONAS.get(str(persona or "").strip().lower(), "")
+        combined = "\n\n".join([p for p in [system_prompt, persona_prompt] if p])
+        if combined:
+            messages.append({"role": "system", "content": combined})
+        elif system_prompt:
             messages.append({"role": "system", "content": system_prompt})
 
         session = self._get_session(guild_id, user_id)
@@ -139,3 +154,29 @@ class DeepSeekService:
             return ""
         text = _MENTION_RE.sub("", text)
         return text.strip()
+
+    def extract_persona(self, text: str) -> tuple[str | None, str]:
+        if not text:
+            return None, ""
+        match = _PERSONA_RE.search(text)
+        if not match:
+            return None, text.strip()
+        raw = match.group(1).strip().lower()
+        persona = raw if raw in _PERSONAS else None
+        cleaned = (text[: match.start()] + text[match.end():]).strip()
+        return persona, cleaned
+
+    def daily_limit(self) -> int:
+        return _DAILY_LIMIT
+
+    def reset_daily_limit(self, guild_id: int, user_id: int | None = None) -> int:
+        if user_id is not None:
+            self._daily_counts.pop((int(guild_id), int(user_id)), None)
+            return 1
+        removed = 0
+        gid = int(guild_id)
+        for key in list(self._daily_counts.keys()):
+            if key[0] == gid:
+                self._daily_counts.pop(key, None)
+                removed += 1
+        return removed
