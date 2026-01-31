@@ -302,6 +302,7 @@ class Database:
             PRIMARY KEY (guild_id, channel_id)
         );
         """)
+        await self._ensure_counting_columns()
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS applications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -362,6 +363,11 @@ class Database:
         await self._ensure_column("tickets", "escalated_level", "INTEGER DEFAULT 0")
         await self._ensure_column("tickets", "escalated_by", "INTEGER")
         await self._ensure_column("tickets", "escalated_at", "TEXT")
+
+    async def _ensure_counting_columns(self):
+        await self._ensure_column("counting_states", "last_count_value", "INTEGER")
+        await self._ensure_column("counting_states", "last_count_user_id", "INTEGER")
+        await self._ensure_column("counting_states", "last_count_at", "TEXT")
         await self._conn.commit()
 
     async def _ensure_birthdays_global_seed(self):
@@ -1523,7 +1529,18 @@ class Database:
     async def get_counting_state(self, guild_id: int, channel_id: int):
         cur = await self._conn.execute(
             """
-            SELECT guild_id, channel_id, current_number, last_user_id, highscore, total_counts, total_fails, updated_at
+            SELECT
+                guild_id,
+                channel_id,
+                current_number,
+                last_user_id,
+                highscore,
+                total_counts,
+                total_fails,
+                updated_at,
+                last_count_value,
+                last_count_user_id,
+                last_count_at
             FROM counting_states
             WHERE guild_id = ? AND channel_id = ?
             LIMIT 1;
@@ -1541,20 +1558,38 @@ class Database:
         highscore: int,
         total_counts: int,
         total_fails: int,
+        last_count_value: int | None,
+        last_count_user_id: int | None,
+        last_count_at: str | None,
     ):
         updated_at = await self.now_iso()
         await self._conn.execute(
             """
             INSERT INTO counting_states
-            (guild_id, channel_id, current_number, last_user_id, highscore, total_counts, total_fails, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (
+                guild_id,
+                channel_id,
+                current_number,
+                last_user_id,
+                highscore,
+                total_counts,
+                total_fails,
+                updated_at,
+                last_count_value,
+                last_count_user_id,
+                last_count_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id, channel_id) DO UPDATE SET
                 current_number=excluded.current_number,
                 last_user_id=excluded.last_user_id,
                 highscore=excluded.highscore,
                 total_counts=excluded.total_counts,
                 total_fails=excluded.total_fails,
-                updated_at=excluded.updated_at;
+                updated_at=excluded.updated_at,
+                last_count_value=excluded.last_count_value,
+                last_count_user_id=excluded.last_count_user_id,
+                last_count_at=excluded.last_count_at;
             """,
             (
                 int(guild_id),
@@ -1565,6 +1600,9 @@ class Database:
                 int(total_counts),
                 int(total_fails),
                 updated_at,
+                int(last_count_value) if last_count_value is not None else None,
+                int(last_count_user_id) if last_count_user_id is not None else None,
+                str(last_count_at) if last_count_at is not None else None,
             ),
         )
         await self._conn.commit()

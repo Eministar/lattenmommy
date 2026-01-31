@@ -33,6 +33,7 @@ from bot.modules.ai.cogs.mention_ai_listener import MentionAIListener
 from bot.modules.ai.cogs.ai_commands import AICommands
 from bot.modules.ai.services.deepseek_service import DeepSeekService
 from bot.modules.counting.cogs.counting_listener import CountingListener
+from bot.modules.counting.cogs.counting_commands import CountingCommands
 from bot.modules.counting.services.counting_service import CountingService
 from bot.modules.wort_zum_sonntag.cogs.wort_commands import WortCommands
 from bot.modules.wort_zum_sonntag.services.wort_service import WortZumSonntagService
@@ -123,6 +124,7 @@ class StarryBot(commands.Bot):
         await self.add_cog(MentionAIListener(self))
         await self.add_cog(AICommands(self))
         await self.add_cog(CountingListener(self))
+        await self.add_cog(CountingCommands(self))
         await self.add_cog(WortCommands(self))
 
         await self.add_cog(ModerationCommands(self))

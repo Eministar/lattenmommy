@@ -58,6 +58,9 @@ class CountingState:
     highscore: int = 0
     total_counts: int = 0
     total_fails: int = 0
+    last_count_value: int | None = None
+    last_count_user_id: int | None = None
+    last_count_at: str | None = None
 
 
 class CountingService:
@@ -116,13 +119,13 @@ class CountingService:
         return out.strip()
 
     def _build_channel_topic(self, state: CountingState) -> str:
-        last_count = max(0, int(state.current_number) - 1)
-        attempts = int(state.total_counts) + int(state.total_fails)
+        last_count = int(state.last_count_value) if state.last_count_value is not None else max(0, int(state.current_number) - 1)
+        streak = max(0, int(state.current_number) - 1)
+        total_msgs = int(state.total_counts) + int(state.total_fails)
         topic = (
             f"🔢 Letzter Count: {last_count} | "
-            f"✅ Counts: {int(state.total_counts)} | "
-            f"❌ Fails: {int(state.total_fails)} | "
-            f"💬 Gesamt: {attempts}"
+            f"🔁 Streak: {streak} | "
+            f"💬 Gesamt: {total_msgs}"
         )
         return topic.strip()
 
@@ -237,6 +240,9 @@ class CountingService:
                 highscore=int(row[4] or 0),
                 total_counts=int(row[5] or 0),
                 total_fails=int(row[6] or 0),
+                last_count_value=int(row[8]) if len(row) > 8 and row[8] is not None else None,
+                last_count_user_id=int(row[9]) if len(row) > 9 and row[9] is not None else None,
+                last_count_at=str(row[10]) if len(row) > 10 and row[10] is not None else None,
             )
         else:
             state = CountingState()
@@ -254,9 +260,26 @@ class CountingService:
                 highscore=state.highscore,
                 total_counts=state.total_counts,
                 total_fails=state.total_fails,
+                last_count_value=state.last_count_value,
+                last_count_user_id=state.last_count_user_id,
+                last_count_at=state.last_count_at,
             )
         except Exception:
             pass
+
+    async def reset_state(self, channel_id: int, guild_id: int, full: bool = False) -> CountingState:
+        state = await self.get_state(channel_id, guild_id)
+        state.current_number = 1
+        state.last_user_id = None
+        if full:
+            state.highscore = 0
+            state.total_counts = 0
+            state.total_fails = 0
+            state.last_count_value = None
+            state.last_count_user_id = None
+            state.last_count_at = None
+        await self.save_state(channel_id, guild_id, state)
+        return state
 
     def _apply_reset(self, state: CountingState) -> int:
         last_count = max(0, int(state.current_number) - 1)
@@ -376,12 +399,9 @@ class CountingService:
         channel_id: int,
         state: CountingState,
     ):
-        topic = self._build_channel_topic(state)
-        if not topic:
-            return
-
         payload = {
-            "last": max(0, int(state.current_number) - 1),
+            "current_number": int(state.current_number),
+            "last_count_value": int(state.last_count_value) if state.last_count_value is not None else None,
             "counts": int(state.total_counts),
             "fails": int(state.total_fails),
         }
@@ -400,12 +420,15 @@ class CountingService:
                 ch = guild.get_channel(int(channel_id))
                 if not ch or not hasattr(ch, "topic"):
                     return
-                attempts = int(data["counts"]) + int(data["fails"])
+                last_count_value = data.get("last_count_value")
+                current_number = int(data.get("current_number") or 1)
+                last_count = int(last_count_value) if last_count_value is not None else max(0, current_number - 1)
+                streak = max(0, current_number - 1)
+                total_msgs = int(data["counts"]) + int(data["fails"])
                 rendered = (
-                    f"🔢 Letzter Count: {int(data['last'])} | "
-                    f"✅ Counts: {int(data['counts'])} | "
-                    f"❌ Fails: {int(data['fails'])} | "
-                    f"💬 Gesamt: {attempts}"
+                    f"🔢 • Letzter Count: {last_count} | "
+                    f"🔁 • Streak: {streak} | "
+                    f"💬 • Gesamt: {total_msgs}"
                 ).strip()
                 rendered = rendered[:900]
                 if getattr(ch, "topic", None) != rendered:
@@ -499,6 +522,12 @@ class CountingService:
                 if value > state.highscore:
                     state.highscore = int(value)
                 state.current_number = int(value) + 1
+                state.last_count_value = int(value)
+                state.last_count_user_id = int(message.author.id)
+                try:
+                    state.last_count_at = await self.db.now_iso()
+                except Exception:
+                    pass
 
                 await self.save_state(channel_id, guild_id, state)
                 self._cooldowns[(channel_id, int(message.author.id))] = time.monotonic()
