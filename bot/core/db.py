@@ -347,6 +347,37 @@ class Database:
             PRIMARY KEY (guild_id, thread_id)
         );
         """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS parliament_stats (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            elected_count INTEGER NOT NULL,
+            candidated_count INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS parliament_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message_id INTEGER,
+            candidate_ids_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            ended_at TEXT
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS parliament_vote_entries (
+            vote_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            candidate_id INTEGER NOT NULL,
+            voted_at TEXT NOT NULL,
+            PRIMARY KEY (vote_id, user_id)
+        );
+        """)
 
         await self._conn.commit()
         await self._ensure_birthdays_global_seed()
@@ -1253,6 +1284,172 @@ class Database:
             (int(guild_id), int(thread_id)),
         )
         return await cur.fetchone()
+
+    async def get_parliament_stats(self, guild_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, user_id, elected_count, candidated_count
+            FROM parliament_stats
+            WHERE guild_id = ? AND user_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(user_id)),
+        )
+        return await cur.fetchone()
+
+    async def list_parliament_stats(self, guild_id: int, user_ids: list[int]):
+        if not user_ids:
+            return []
+        placeholders = ",".join("?" for _ in user_ids)
+        cur = await self._conn.execute(
+            f"""
+            SELECT guild_id, user_id, elected_count, candidated_count
+            FROM parliament_stats
+            WHERE guild_id = ? AND user_id IN ({placeholders});
+            """,
+            (int(guild_id), *[int(uid) for uid in user_ids]),
+        )
+        return await cur.fetchall()
+
+    async def increment_parliament_candidated(self, guild_id: int, user_id: int, amount: int = 1):
+        row = await self.get_parliament_stats(guild_id, user_id)
+        elected = int(row[2]) if row else 0
+        candidated = int(row[3]) if row else 0
+        candidated += int(amount)
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO parliament_stats (guild_id, user_id, elected_count, candidated_count)
+            VALUES (?, ?, ?, ?);
+            """,
+            (int(guild_id), int(user_id), int(elected), int(candidated)),
+        )
+        await self._conn.commit()
+
+    async def increment_parliament_elected(self, guild_id: int, user_id: int, amount: int = 1):
+        row = await self.get_parliament_stats(guild_id, user_id)
+        elected = int(row[2]) if row else 0
+        candidated = int(row[3]) if row else 0
+        elected += int(amount)
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO parliament_stats (guild_id, user_id, elected_count, candidated_count)
+            VALUES (?, ?, ?, ?);
+            """,
+            (int(guild_id), int(user_id), int(elected), int(candidated)),
+        )
+        await self._conn.commit()
+
+    async def create_parliament_vote(
+        self,
+        guild_id: int,
+        channel_id: int,
+        candidate_ids_json: str,
+        created_by: int,
+    ):
+        created_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO parliament_votes (
+                guild_id, channel_id, candidate_ids_json, status, created_by, created_at
+            )
+            VALUES (?, ?, ?, 'open', ?, ?);
+            """,
+            (int(guild_id), int(channel_id), str(candidate_ids_json), int(created_by), created_at),
+        )
+        await self._conn.commit()
+        cur = await self._conn.execute("SELECT last_insert_rowid();")
+        row = await cur.fetchone()
+        return int(row[0])
+
+    async def set_parliament_vote_message(self, vote_id: int, message_id: int):
+        await self._conn.execute(
+            """
+            UPDATE parliament_votes SET message_id = ? WHERE id = ?;
+            """,
+            (int(message_id), int(vote_id)),
+        )
+        await self._conn.commit()
+
+    async def get_parliament_vote(self, vote_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, candidate_ids_json, status, created_by, created_at, ended_at
+            FROM parliament_votes
+            WHERE id = ?
+            LIMIT 1;
+            """,
+            (int(vote_id),),
+        )
+        return await cur.fetchone()
+
+    async def get_open_parliament_vote(self, guild_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, candidate_ids_json, status, created_by, created_at, ended_at
+            FROM parliament_votes
+            WHERE guild_id = ? AND status = 'open'
+            ORDER BY id DESC
+            LIMIT 1;
+            """,
+            (int(guild_id),),
+        )
+        return await cur.fetchone()
+
+    async def close_parliament_vote(self, vote_id: int):
+        ended_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE parliament_votes SET status = 'closed', ended_at = ? WHERE id = ?;
+            """,
+            (str(ended_at), int(vote_id)),
+        )
+        await self._conn.commit()
+
+    async def add_parliament_vote_entry(self, vote_id: int, user_id: int, candidate_id: int):
+        voted_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT OR IGNORE INTO parliament_vote_entries (vote_id, user_id, candidate_id, voted_at)
+            VALUES (?, ?, ?, ?);
+            """,
+            (int(vote_id), int(user_id), int(candidate_id), str(voted_at)),
+        )
+        await self._conn.commit()
+        return await self.get_parliament_vote_entry(vote_id, user_id)
+
+    async def get_parliament_vote_entry(self, vote_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT candidate_id FROM parliament_vote_entries WHERE vote_id = ? AND user_id = ? LIMIT 1;
+            """,
+            (int(vote_id), int(user_id)),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return int(row[0])
+
+    async def count_parliament_vote_entries(self, vote_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT candidate_id, COUNT(*) FROM parliament_vote_entries
+            WHERE vote_id = ?
+            GROUP BY candidate_id;
+            """,
+            (int(vote_id),),
+        )
+        rows = await cur.fetchall()
+        return {int(r[0]): int(r[1]) for r in rows if r and r[0] is not None}
+
+    async def list_open_parliament_votes(self):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, candidate_ids_json
+            FROM parliament_votes
+            WHERE status = 'open';
+            """,
+        )
+        return await cur.fetchall()
 
     async def get_wzs_submission(self, submission_id: int):
         cur = await self._conn.execute(

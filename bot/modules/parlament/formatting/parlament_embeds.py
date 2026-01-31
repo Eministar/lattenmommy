@@ -1,0 +1,145 @@
+import discord
+from discord.utils import format_dt
+from datetime import datetime
+from bot.utils.emojis import em
+
+
+DEFAULT_COLOR = 0xB16B91
+
+
+def parse_hex_color(value: str, default: int = DEFAULT_COLOR) -> int:
+    if not value:
+        return default
+    v = str(value).strip().replace("#", "")
+    try:
+        return int(v, 16)
+    except Exception:
+        return default
+
+
+def _color(settings, guild: discord.Guild | None) -> int:
+    if guild:
+        value = settings.get_guild(guild.id, "design.accent_color", "#B16B91")
+    else:
+        value = settings.get("design.accent_color", "#B16B91")
+    return parse_hex_color(value)
+
+
+def _status_emoji(status: discord.Status | None) -> str:
+    if status == discord.Status.online:
+        return "🟢"
+    if status == discord.Status.dnd:
+        return "🔴"
+    if status == discord.Status.idle:
+        return "🟠"
+    return "⚫"
+
+
+def _status_order(status: discord.Status | None) -> int:
+    if status == discord.Status.online:
+        return 0
+    if status == discord.Status.dnd:
+        return 1
+    if status == discord.Status.idle:
+        return 2
+    return 3
+
+
+def _stats_line(stats: tuple[int, int] | None) -> str:
+    elected = int(stats[0]) if stats else 0
+    candidated = int(stats[1]) if stats else 0
+    return f"Gewählt: **{elected}** • Kandidiert: **{candidated}**"
+
+
+def _member_line(member: discord.Member, stats: tuple[int, int] | None) -> str:
+    emoji = _status_emoji(getattr(member, "status", None))
+    return f"{emoji} {member.mention} — {_stats_line(stats)}"
+
+
+def build_parliament_panel_embed(
+    settings,
+    guild: discord.Guild | None,
+    candidates: list[discord.Member],
+    members: list[discord.Member],
+    stats_map: dict[int, tuple[int, int]],
+    updated_at: datetime | None = None,
+):
+    palace = em(settings, "palace", guild) or "🏛️"
+    arrow2 = em(settings, "arrow2", guild) or "»"
+
+    candidates_sorted = sorted(
+        candidates,
+        key=lambda m: (_status_order(getattr(m, "status", None)), m.display_name.lower()),
+    )
+    members_sorted = sorted(
+        members,
+        key=lambda m: (_status_order(getattr(m, "status", None)), m.display_name.lower()),
+    )
+
+    cand_lines = [
+        _member_line(m, stats_map.get(int(m.id))) for m in candidates_sorted
+    ]
+    mem_lines = [
+        _member_line(m, stats_map.get(int(m.id))) for m in members_sorted
+    ]
+
+    if not cand_lines:
+        cand_lines = ["—"]
+    if not mem_lines:
+        mem_lines = ["—"]
+
+    desc = (
+        f"{arrow2} Live-Status aller Kandidaten und Mitglieder.\n\n"
+        f"**Kandidaten ({len(candidates)})**\n" + "\n".join(cand_lines) + "\n\n"
+        f"**Mitglieder ({len(members)})**\n" + "\n".join(mem_lines)
+    )
+
+    emb = discord.Embed(
+        title=f"{palace} 𑁉 PARLAMENT – STATUS",
+        description=desc,
+        color=_color(settings, guild),
+    )
+    if guild and guild.icon:
+        emb.set_thumbnail(url=guild.icon.url)
+    if updated_at:
+        emb.set_footer(text=f"Aktualisiert: {format_dt(updated_at, style='t')}")
+    return emb
+
+
+def _bar(pct: int) -> str:
+    full = "█" * max(1, int(pct / 10))
+    empty = "░" * (10 - len(full))
+    return f"`{full}{empty}` {pct}%"
+
+
+def build_parliament_vote_embed(
+    settings,
+    guild: discord.Guild | None,
+    candidates: list[discord.Member],
+    counts: dict[int, int],
+    status_label: str,
+    created_at: datetime | None = None,
+):
+    palace = em(settings, "palace", guild) or "🏛️"
+    arrow2 = em(settings, "arrow2", guild) or "»"
+
+    total_votes = sum(counts.values())
+    lines = []
+    for idx, m in enumerate(candidates, start=1):
+        votes = int(counts.get(int(m.id), 0))
+        pct = int((votes / total_votes) * 100) if total_votes else 0
+        lines.append(f"**{idx}. {m.display_name}**\n{_bar(pct)} • {votes} Stimme(n)")
+
+    desc = (
+        f"{arrow2} Bitte wähle deinen Kandidaten. Jede Person darf **einmal** abstimmen.\n\n"
+        + "\n\n".join(lines)
+    )
+
+    emb = discord.Embed(
+        title=f"{palace} 𑁉 PARLAMENT – VOTUM • {status_label}",
+        description=desc,
+        color=_color(settings, guild),
+    )
+    if created_at:
+        emb.set_footer(text=f"Start: {format_dt(created_at, style='f')}")
+    return emb
