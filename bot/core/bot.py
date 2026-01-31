@@ -56,6 +56,8 @@ from bot.modules.seelsorge.services.seelsorge_service import SeelsorgeService
 from bot.modules.seelsorge.cogs.seelsorge_commands import SeelsorgeCommands
 from bot.modules.seelsorge.cogs.seelsorge_listener import SeelsorgeListener
 from bot.modules.seelsorge.views.panel import SeelsorgePanelView
+from bot.modules.parlament.services.parlament_service import ParliamentService
+from bot.modules.parlament.cogs.parlament_commands import ParliamentCommands
 
 from bot.core.presence import PresenceRotator
 from bot.modules.logs.forum_log_service import ForumLogService
@@ -97,6 +99,7 @@ class StarryBot(commands.Bot):
         self.deepseek_service = DeepSeekService(self, self.settings, self.logger)
         self.counting_service = CountingService(self, self.settings, self.db, self.logger)
         self.seelsorge_service = SeelsorgeService(self, self.settings, self.db, self.logger)
+        self.parlament_service = ParliamentService(self, self.settings, self.db, self.logger)
 
         self.forum_logs = ForumLogService(self, self.settings, self.db)
         self._boot_done = False
@@ -108,6 +111,7 @@ class StarryBot(commands.Bot):
         self.giveaway_loop.start()
         self.news_loop.start()
         self.placeholder_loop.start()
+        self.parlament_loop.start()
 
     async def setup_hook(self):
         await self.add_cog(TicketDMListener(self))
@@ -136,6 +140,7 @@ class StarryBot(commands.Bot):
         await self.add_cog(FunCommands(self))
         await self.add_cog(SeelsorgeListener(self))
         await self.add_cog(SeelsorgeCommands(self))
+        await self.add_cog(ParliamentCommands(self))
         await self.add_cog(ModerationCommands(self))
         await self.add_cog(ModLogListener(self))
         await self.add_cog(ChannelRoleLogListener(self))
@@ -226,6 +231,15 @@ class StarryBot(commands.Bot):
         except Exception:
             pass
 
+    @tasks.loop(seconds=60.0)
+    async def parlament_loop(self):
+        try:
+            if not self.parlament_service:
+                return
+            await self.parlament_service.refresh_all_panels()
+        except Exception:
+            pass
+
     @reload_settings_loop.error
     async def reload_settings_loop_error(self, error: Exception):
             await self._emit_bot_error("reload_settings_loop", error, extra=None, guild=None)
@@ -253,6 +267,10 @@ class StarryBot(commands.Bot):
     @placeholder_loop.error
     async def placeholder_loop_error(self, error: Exception):
             await self._emit_bot_error("placeholder_loop", error, extra=None, guild=None)
+
+    @parlament_loop.error
+    async def parlament_loop_error(self, error: Exception):
+            await self._emit_bot_error("parlament_loop", error, extra=None, guild=None)
 
 
     async def on_ready(self):
@@ -284,6 +302,11 @@ class StarryBot(commands.Bot):
         if self.poll_service:
             try:
                 await self.poll_service.restore_views()
+            except Exception:
+                pass
+        if self.parlament_service:
+            try:
+                await self.parlament_service.restore_views()
             except Exception:
                 pass
 
