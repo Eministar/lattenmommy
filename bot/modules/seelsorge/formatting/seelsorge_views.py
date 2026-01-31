@@ -135,9 +135,9 @@ def build_submission_view(settings, guild: discord.Guild | None, data: dict) -> 
     created_at = _fmt_dt(data.get("created_at"))
 
     header = "**🧠 𑁉 SEELSORGE – EINTRAG**"
-    who = "Anonym" if anonymous else f"<@{user_id}>"
+    who = "Anonym (Ersteller)" if anonymous else f"<@{user_id}> (Ersteller)"
     meta = (
-        f"┏`👤` - Von: {who}\n"
+        f"┏`👤` - Ersteller: {who}\n"
         f"┣`⏰` - Eingereicht: {created_at}\n"
         f"┗`{lock}` - Privat: {'Ja' if anonymous else 'Nein'}"
     )
