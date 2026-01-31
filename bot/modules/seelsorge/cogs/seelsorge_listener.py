@@ -16,16 +16,19 @@ class SeelsorgeListener(commands.Cog):
             return 0
 
     async def _is_anonymous_thread(self, guild_id: int, thread_id: int) -> bool:
-        try:
-            row = await self.bot.db.get_seelsorge_thread(int(guild_id), int(thread_id))
-        except Exception:
-            row = None
+        row = await self._get_thread_row(guild_id, thread_id)
         if not row:
             return False
         try:
             return bool(int(row[3]))
         except Exception:
             return False
+
+    async def _get_thread_row(self, guild_id: int, thread_id: int):
+        try:
+            return await self.bot.db.get_seelsorge_thread(int(guild_id), int(thread_id))
+        except Exception:
+            return None
 
     @commands.Cog.listener("on_message")
     async def on_message(self, message: discord.Message):
@@ -46,7 +49,18 @@ class SeelsorgeListener(commands.Cog):
         if not forum_id or int(getattr(parent, "id", 0)) != forum_id:
             return
 
-        anonymous = await self._is_anonymous_thread(message.guild.id, thread.id)
+        row = await self._get_thread_row(message.guild.id, thread.id)
+        anonymous = False
+        creator_id = None
+        if row:
+            try:
+                anonymous = bool(int(row[3]))
+            except Exception:
+                anonymous = False
+            try:
+                creator_id = int(row[2])
+            except Exception:
+                creator_id = None
         if not anonymous:
             return
 
@@ -67,7 +81,8 @@ class SeelsorgeListener(commands.Cog):
         except Exception:
             return
 
-        prefix = "**Anonym:** "
+        is_creator = creator_id is not None and message.author and int(message.author.id) == int(creator_id)
+        prefix = "**Anonym (Ersteller):** " if is_creator else "**Anonym:** "
         try:
             await thread.send(prefix + content if content else prefix, files=files)
         except Exception:
