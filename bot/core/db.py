@@ -9,24 +9,35 @@ import aiosqlite
 import aiomysql
 
 class _MySQLCursor:
-    def __init__(self, cur, lastrowid=None):
+    def __init__(self, cur, lastrowid=None, lock=None):
         self._cur = cur
         self.lastrowid = lastrowid if lastrowid is not None else (cur.lastrowid if cur else None)
+        self._lock = lock
+        self._lock_released = False
+
+    def _release_lock(self):
+        if self._lock and not self._lock_released:
+            self._lock.release()
+            self._lock_released = True
 
     async def fetchone(self):
         if not self._cur:
+            self._release_lock()
             return None
         row = await self._cur.fetchone()
         await self._cur.close()
         self._cur = None
+        self._release_lock()
         return row
 
     async def fetchall(self):
         if not self._cur:
+            self._release_lock()
             return []
         rows = await self._cur.fetchall()
         await self._cur.close()
         self._cur = None
+        self._release_lock()
         return rows
 
 
@@ -38,24 +49,27 @@ class _MySQLConn:
 
     async def execute(self, sql: str, params=None):
         normalized = self._normalize_sql(sql)
-        async with self._lock:
-            cur = await self._conn.cursor()
-            try:
-                await cur.execute(normalized, params or ())
-            except Exception as exc:
-                if normalized.lstrip().upper().startswith("CREATE INDEX"):
-                    if hasattr(exc, "args") and exc.args:
-                        code = exc.args[0]
-                        if code == 1061:
-                            await cur.close()
-                            return _MySQLCursor(None)
-                await cur.close()
-                raise
-            if normalized.lstrip().upper().startswith("SELECT"):
-                return _MySQLCursor(cur)
-            lastrowid = cur.lastrowid
+        await self._lock.acquire()
+        cur = await self._conn.cursor()
+        try:
+            await cur.execute(normalized, params or ())
+        except Exception as exc:
+            if normalized.lstrip().upper().startswith("CREATE INDEX"):
+                if hasattr(exc, "args") and exc.args:
+                    code = exc.args[0]
+                    if code == 1061:
+                        await cur.close()
+                        self._lock.release()
+                        return _MySQLCursor(None)
             await cur.close()
-            return _MySQLCursor(None, lastrowid=lastrowid)
+            self._lock.release()
+            raise
+        if normalized.lstrip().upper().startswith("SELECT"):
+            return _MySQLCursor(cur, lock=self._lock)
+        lastrowid = cur.lastrowid
+        await cur.close()
+        self._lock.release()
+        return _MySQLCursor(None, lastrowid=lastrowid)
 
     async def executemany(self, sql: str, seq):
         normalized = self._normalize_sql(sql)
