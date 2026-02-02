@@ -9,11 +9,16 @@ class PresenceRotator:
         self.bot = bot
         self.db = db
         self._i = 0
+        self._error_logged = False
         self._loop.change_interval(seconds=max(12, int(interval_seconds)))
 
     def start(self):
         if not self._loop.is_running():
             self._loop.start()
+            try:
+                print("[OK] PresenceRotator gestartet")
+            except Exception:
+                pass
 
     def stop(self):
         if self._loop.is_running():
@@ -95,7 +100,29 @@ class PresenceRotator:
 
     @tasks.loop(seconds=20)
     async def _loop(self):
-        s = await self._get_stats()
+        try:
+            s = await self._get_stats()
+            self._error_logged = False
+        except Exception as exc:
+            if not self._error_logged:
+                try:
+                    print(f"[WARN] PresenceRotator Stats fehlgeschlagen ({type(exc).__name__}): {exc}")
+                except Exception:
+                    pass
+                self._error_logged = True
+            s = {
+                "total_tickets": 0,
+                "open_tickets": 0,
+                "total_users": 0,
+                "total_messages": 0,
+                "total_voice_hours": 0,
+                "active_users": 0,
+                "warns": 0,
+                "giveaways_open": 0,
+                "polls_open": 0,
+                "applications_open": 0,
+                "wzs_submissions": 0,
+            }
 
         states = [
             (discord.ActivityType.listening, _PRESENCE_TEXT_1),
