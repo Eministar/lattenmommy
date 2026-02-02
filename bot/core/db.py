@@ -116,7 +116,17 @@ class Database:
                 ),
                 self._normalize_sql,
             )
+        if self._driver == "mysql":
+            try:
+                await self._conn.execute("SET SESSION sql_notes = 0")
+            except Exception:
+                pass
         await self._create_tables()
+        if self._driver == "mysql":
+            try:
+                await self._conn.execute("SET SESSION sql_notes = 1")
+            except Exception:
+                pass
         await self._conn.commit()
 
     def _normalize_sql(self, sql: str) -> str:
