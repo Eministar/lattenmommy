@@ -65,10 +65,10 @@ class PresenceRotator:
             active_users_query = (
                 "SELECT COUNT(*) FROM user_stats "
                 "WHERE (last_message_at IS NOT NULL AND "
-                "STR_TO_DATE(REPLACE(SUBSTRING(last_message_at, 1, 19), 'T', ' '), '%Y-%m-%d %H:%i:%s') "
+                "STR_TO_DATE(REPLACE(SUBSTRING(last_message_at, 1, 19), 'T', ' '), '%%Y-%%m-%%d %%H:%%i:%%s') "
                 ">= DATE_SUB(NOW(), INTERVAL 1 DAY)) "
                 "OR (last_voice_at IS NOT NULL AND "
-                "STR_TO_DATE(REPLACE(SUBSTRING(last_voice_at, 1, 19), 'T', ' '), '%Y-%m-%d %H:%i:%s') "
+                "STR_TO_DATE(REPLACE(SUBSTRING(last_voice_at, 1, 19), 'T', ' '), '%%Y-%%m-%%d %%H:%%i:%%s') "
                 ">= DATE_SUB(NOW(), INTERVAL 1 DAY))"
             )
         else:
