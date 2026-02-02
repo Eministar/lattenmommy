@@ -459,8 +459,12 @@ class Database:
             posted_message_id INTEGER
         );
         """)
-        await self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_wzs_status ON wzs_submissions(guild_id, status)")
+        if self._driver == "mysql":
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_wzs_status ON wzs_submissions(guild_id, status(32))")
+        else:
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_wzs_status ON wzs_submissions(guild_id, status)")
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS seelsorge_threads (
             guild_id INTEGER NOT NULL,
