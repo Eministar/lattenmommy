@@ -44,7 +44,13 @@ async def main():
 
     token = _load_token(settings)
 
-    db = Database("data/starry.db")
+    db_type = str(settings.get("database.type", "sqlite") or "sqlite").lower()
+    if db_type == "mysql":
+        mysql_cfg = settings.get("database.mysql", {}) or {}
+        db = Database(mysql=mysql_cfg)
+    else:
+        sqlite_path = str(settings.get("database.sqlite_path", "data/starry.db") or "data/starry.db")
+        db = Database(path=sqlite_path)
     await db.init()
     await settings.load_guild_overrides(db)
 

@@ -3,6 +3,7 @@ fastapi==0.128.0
 uvicorn[standard]==0.40.0
 PyYAML==6.0.3
 aiosqlite==0.22.1
+aiomysql==0.3.2
 python-dotenv==1.2.1
-httpx==0.27.2
+httpx==0.28.1
 audioop-lts; python_version>='3.13'

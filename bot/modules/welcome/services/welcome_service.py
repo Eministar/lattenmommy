@@ -15,8 +15,22 @@ class WelcomeService:
     def _channel_id(self, guild_id: int) -> int:
         return int(self.settings.get_guild_int(guild_id, "welcome.channel_id", 0) or 0)
 
+    def _small_text_channel_id(self, guild_id: int) -> int:
+        cid = int(self.settings.get_guild_int(guild_id, "welcome.small_text_channel_id", 0) or 0)
+        return cid or self._channel_id(guild_id)
+
+    def _embed_channel_id(self, guild_id: int) -> int:
+        cid = int(self.settings.get_guild_int(guild_id, "welcome.embed_channel_id", 0) or 0)
+        return cid or self._channel_id(guild_id)
+
     def _small_text(self, guild_id: int) -> str:
         return str(self.settings.get_guild(guild_id, "welcome.small_text", "👋 Willkommen bei uns,") or "").strip()
+
+    def _leave_channel_id(self, guild_id: int) -> int:
+        return int(self.settings.get_guild_int(guild_id, "welcome.leave_channel_id", 0) or 0)
+
+    def _leave_text(self, guild_id: int) -> str:
+        return str(self.settings.get_guild(guild_id, "welcome.leave_text", "👋 {user} hat uns verlassen.") or "").strip()
 
     def _presets(self, guild_id: int) -> list[str]:
         return self.settings.get_guild(guild_id, "welcome.presets", []) or []
@@ -43,6 +57,19 @@ class WelcomeService:
         except Exception:
             return 0xB16B91
 
+    async def _resolve_channel(self, guild: discord.Guild, channel_id: int) -> discord.abc.Messageable | None:
+        if not channel_id:
+            return None
+        ch = guild.get_channel(int(channel_id))
+        if not ch:
+            try:
+                ch = await self.bot.fetch_channel(int(channel_id))
+            except Exception:
+                ch = None
+        if not ch or not isinstance(ch, discord.abc.Messageable):
+            return None
+        return ch
+
     async def handle_member_join(self, member: discord.Member):
         guild = member.guild
         if not guild or not self._enabled(guild.id):
@@ -50,16 +77,9 @@ class WelcomeService:
         if member.bot:
             return
 
-        ch_id = self._channel_id(guild.id)
-        if not ch_id:
-            return
-        ch = guild.get_channel(ch_id)
-        if not ch:
-            try:
-                ch = await self.bot.fetch_channel(int(ch_id))
-            except Exception:
-                ch = None
-        if not ch or not isinstance(ch, discord.abc.Messageable):
+        small_ch = await self._resolve_channel(guild, self._small_text_channel_id(guild.id))
+        embed_ch = await self._resolve_channel(guild, self._embed_channel_id(guild.id))
+        if not small_ch and not embed_ch:
             return
 
         presets = self._presets(guild.id)
@@ -80,15 +100,16 @@ class WelcomeService:
             emb.set_footer(text=footer)
 
         small_text = self._small_text(guild.id)
-        if small_text:
+        if small_text and small_ch:
             try:
-                await ch.send(f"{small_text} {member.mention}")
+                await small_ch.send(f"{small_text} {member.mention}")
             except Exception:
                 pass
-        try:
-            await ch.send(embed=emb)
-        except Exception:
-            pass
+        if embed_ch:
+            try:
+                await embed_ch.send(embed=emb)
+            except Exception:
+                pass
 
         role_ids = self._role_ids(guild.id)
         if role_ids:
@@ -102,3 +123,23 @@ class WelcomeService:
                     await member.add_roles(*roles, reason="Welcome roles")
                 except Exception:
                     pass
+
+    async def handle_member_leave(self, member: discord.Member):
+        guild = member.guild
+        if not guild or not self._enabled(guild.id):
+            return
+        if member.bot:
+            return
+
+        ch = await self._resolve_channel(guild, self._leave_channel_id(guild.id))
+        if not ch:
+            return
+
+        text = self._leave_text(guild.id)
+        if not text:
+            return
+        text = text.replace("{user}", member.mention).replace("{server}", guild.name)
+        try:
+            await ch.send(text)
+        except Exception:
+            pass

@@ -1,21 +1,144 @@
 import os
 import json
-import aiosqlite
-from datetime import datetime, timezone
+import re
 import time
+from datetime import datetime, timezone
+
+import aiosqlite
+import aiomysql
+
+class _MySQLCursor:
+    def __init__(self, cur, lastrowid=None):
+        self._cur = cur
+        self.lastrowid = lastrowid if lastrowid is not None else (cur.lastrowid if cur else None)
+
+    async def fetchone(self):
+        if not self._cur:
+            return None
+        row = await self._cur.fetchone()
+        await self._cur.close()
+        self._cur = None
+        return row
+
+    async def fetchall(self):
+        if not self._cur:
+            return []
+        rows = await self._cur.fetchall()
+        await self._cur.close()
+        self._cur = None
+        return rows
+
+
+class _MySQLConn:
+    def __init__(self, conn, normalize_sql):
+        self._conn = conn
+        self._normalize_sql = normalize_sql
+
+    async def execute(self, sql: str, params=None):
+        normalized = self._normalize_sql(sql)
+        cur = await self._conn.cursor()
+        try:
+            await cur.execute(normalized, params or ())
+        except Exception as exc:
+            if normalized.lstrip().upper().startswith("CREATE INDEX"):
+                if hasattr(exc, "args") and exc.args:
+                    code = exc.args[0]
+                    if code == 1061:
+                        await cur.close()
+                        return _MySQLCursor(None)
+            await cur.close()
+            raise
+        if normalized.lstrip().upper().startswith("SELECT"):
+            return _MySQLCursor(cur)
+        lastrowid = cur.lastrowid
+        await cur.close()
+        return _MySQLCursor(None, lastrowid=lastrowid)
+
+    async def executemany(self, sql: str, seq):
+        normalized = self._normalize_sql(sql)
+        cur = await self._conn.cursor()
+        await cur.executemany(normalized, seq)
+        await cur.close()
+
+    async def commit(self):
+        await self._conn.commit()
+
+    async def close(self):
+        self._conn.close()
+
 
 class Database:
-    def __init__(self, path: str):
+    def __init__(self, path: str | None = None, mysql: dict | None = None):
         self.path = path
+        self.mysql = mysql or None
+        self._driver = "mysql" if mysql else "sqlite"
         self._conn = None
+        self._mysql_db = None
 
     async def init(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        self._conn = await aiosqlite.connect(self.path)
-        await self._conn.execute("PRAGMA journal_mode=WAL;")
-        await self._conn.execute("PRAGMA foreign_keys=ON;")
+        if self._driver == "sqlite":
+            path = self.path or "data/starry.db"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self._conn = await aiosqlite.connect(path)
+            await self._conn.execute("PRAGMA journal_mode=WAL;")
+            await self._conn.execute("PRAGMA foreign_keys=ON;")
+        else:
+            cfg = self.mysql or {}
+            self._mysql_db = str(cfg.get("database", "") or "")
+            self._conn = _MySQLConn(
+                await aiomysql.connect(
+                    host=str(cfg.get("host", "127.0.0.1")),
+                    port=int(cfg.get("port", 3306)),
+                    user=str(cfg.get("user", "root")),
+                    password=str(cfg.get("password", "")),
+                    db=self._mysql_db,
+                    charset=str(cfg.get("charset", "utf8mb4")),
+                    autocommit=False,
+                ),
+                self._normalize_sql,
+            )
         await self._create_tables()
         await self._conn.commit()
+
+    def _normalize_sql(self, sql: str) -> str:
+        if self._driver != "mysql":
+            return sql
+        stripped = sql.lstrip().upper()
+        if stripped.startswith("CREATE TABLE") or stripped.startswith("CREATE INDEX"):
+            return self._normalize_ddl(sql)
+        normalized = sql
+        normalized = normalized.replace("INSERT OR IGNORE", "INSERT IGNORE")
+        normalized = normalized.replace("INSERT OR REPLACE", "REPLACE")
+        normalized = re.sub(
+            r"ON\\s+CONFLICT\\s*\\([^\\)]*\\)\\s+DO\\s+UPDATE\\s+SET",
+            "ON DUPLICATE KEY UPDATE",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(r"excluded\\.([A-Za-z0-9_]+)", r"VALUES(\\1)", normalized)
+        normalized = normalized.replace("last_insert_rowid()", "LAST_INSERT_ID()")
+        normalized = normalized.replace("?", "%s")
+        return normalized
+
+    def _normalize_ddl(self, sql: str) -> str:
+        if self._driver != "mysql":
+            return sql
+        normalized = sql
+        normalized = re.sub(
+            r"CREATE\\s+INDEX\\s+IF\\s+NOT\\s+EXISTS",
+            "CREATE INDEX",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"INTEGER\\s+PRIMARY\\s+KEY\\s+AUTOINCREMENT",
+            "BIGINT AUTO_INCREMENT PRIMARY KEY",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(r"\\bINTEGER\\b", "BIGINT", normalized, flags=re.IGNORECASE)
+        normalized = normalized.replace("AUTOINCREMENT", "AUTO_INCREMENT")
+        return normalized
 
     async def _create_tables(self):
         await self._conn.execute("""
@@ -99,7 +222,7 @@ class Database:
                                      INTEGER
                                      NOT
                                      NULL,
-                                     key
+                                     `key`
                                      TEXT
                                      NOT
                                      NULL,
@@ -115,7 +238,7 @@ class Database:
                                      KEY
                                  (
                                      guild_id,
-                                     key
+                                     `key`
                                      )
                                  )
                                  """)
@@ -174,10 +297,10 @@ class Database:
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS guild_configs (
             guild_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
+            `key` TEXT NOT NULL,
             value_json TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (guild_id, key)
+            PRIMARY KEY (guild_id, `key`)
         );
         """)
         await self._conn.execute("""
@@ -419,9 +542,20 @@ class Database:
         await self._ensure_birthdays_global_seed()
 
     async def _table_has_column(self, table: str, column: str) -> bool:
-        cur = await self._conn.execute(f"PRAGMA table_info({table});")
-        rows = await cur.fetchall()
-        return any(r and str(r[1]) == column for r in rows)
+        if self._driver == "sqlite":
+            cur = await self._conn.execute(f"PRAGMA table_info({table});")
+            rows = await cur.fetchall()
+            return any(r and str(r[1]) == column for r in rows)
+        cur = await self._conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s;
+            """,
+            (self._mysql_db, table, column),
+        )
+        row = await cur.fetchone()
+        return bool(row and int(row[0]) > 0)
 
     async def _ensure_column(self, table: str, column: str, definition: str):
         if not await self._table_has_column(table, column):
@@ -1081,7 +1215,7 @@ class Database:
     async def set_guild_config(self, guild_id: int, key: str, value_json: str):
         updated_at = await self.now_iso()
         await self._conn.execute("""
-        INSERT INTO guild_configs (guild_id, key, value_json, updated_at)
+        INSERT INTO guild_configs (guild_id, `key`, value_json, updated_at)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(guild_id, key) DO UPDATE SET
             value_json = excluded.value_json,
@@ -1091,21 +1225,21 @@ class Database:
 
     async def get_guild_config(self, guild_id: int, key: str):
         cur = await self._conn.execute("""
-        SELECT value_json FROM guild_configs WHERE guild_id = ? AND key = ? LIMIT 1;
+        SELECT value_json FROM guild_configs WHERE guild_id = ? AND `key` = ? LIMIT 1;
         """, (int(guild_id), str(key)))
         row = await cur.fetchone()
         return row[0] if row else None
 
     async def list_guild_configs(self, guild_id: int):
         cur = await self._conn.execute(
-            "SELECT key, value_json FROM guild_configs WHERE guild_id = ?;",
+            "SELECT `key`, value_json FROM guild_configs WHERE guild_id = ?;",
             (int(guild_id),),
         )
         return await cur.fetchall()
 
     async def list_all_guild_configs(self):
         cur = await self._conn.execute(
-            "SELECT guild_id, key, value_json FROM guild_configs;"
+            "SELECT guild_id, `key`, value_json FROM guild_configs;"
         )
         return await cur.fetchall()
 
@@ -1765,7 +1899,7 @@ class Database:
 
     async def get_log_thread(self, guild_id: int, key: str) -> int | None:
         cur = await self._conn.execute(
-            "SELECT thread_id FROM log_threads WHERE guild_id=? AND key=?",
+            "SELECT thread_id FROM log_threads WHERE guild_id=? AND `key`=?",
             (int(guild_id), str(key))
         )
         row = await cur.fetchone()
@@ -1774,8 +1908,8 @@ class Database:
     async def set_log_thread(self, guild_id: int, forum_id: int, key: str, thread_id: int):
         now = int(time.time())
         await self._conn.execute(
-            "INSERT INTO log_threads(guild_id,forum_id,key,thread_id,created_at) VALUES(?,?,?,?,?) "
-            "ON CONFLICT(guild_id,key) DO UPDATE SET forum_id=excluded.forum_id, thread_id=excluded.thread_id",
+            "INSERT INTO log_threads(guild_id,forum_id,`key`,thread_id,created_at) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(guild_id,`key`) DO UPDATE SET forum_id=excluded.forum_id, thread_id=excluded.thread_id",
             (int(guild_id), int(forum_id), str(key), int(thread_id), now)
         )
         await self._conn.commit()

@@ -11,3 +11,7 @@ class WelcomeListener(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         await self.service.handle_member_join(member)
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        await self.service.handle_member_leave(member)
