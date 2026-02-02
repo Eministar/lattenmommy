@@ -289,6 +289,10 @@ class StarryBot(commands.Bot):
         if self._boot_done:
             return
         self._boot_done = True
+        try:
+            print(f"[OK] Discord verbunden als {self.user} ({self.user.id})")
+        except Exception:
+            pass
         await self.forum_logs.start()
         for guild in list(self.guilds):
             if self.user_stats_service:

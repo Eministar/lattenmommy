@@ -1,6 +1,7 @@
 import os
 import asyncio
 import signal
+import traceback
 from dotenv import load_dotenv
 
 from bot.core.settings import SettingsManager
@@ -77,14 +78,31 @@ async def main():
         pass
 
     await web.start()
+    dash_host = settings.get("bot.dashboard.host", "0.0.0.0")
+    dash_port = int(settings.get("bot.dashboard.port", 8787))
+    print(f"[OK] Dashboard läuft auf {dash_host}:{dash_port}")
 
-    bot_task = asyncio.create_task(bot.start(token))
+    async def _run_bot():
+        try:
+            await bot.start(token)
+        except Exception as exc:
+            print(f"[ERROR] Bot-Start fehlgeschlagen ({type(exc).__name__}): {exc}")
+            traceback.print_exc()
+            raise
+
+    bot_task = asyncio.create_task(_run_bot())
     stop_task = asyncio.create_task(stop_event.wait())
 
     done, pending = await asyncio.wait(
         {bot_task, stop_task},
         return_when=asyncio.FIRST_COMPLETED
     )
+
+    if bot_task in done:
+        try:
+            bot_task.result()
+        except Exception:
+            pass
 
     if stop_task in done and not bot_task.done():
         try:

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import json
 import re
 import time
@@ -33,35 +34,39 @@ class _MySQLConn:
     def __init__(self, conn, normalize_sql):
         self._conn = conn
         self._normalize_sql = normalize_sql
+        self._lock = asyncio.Lock()
 
     async def execute(self, sql: str, params=None):
         normalized = self._normalize_sql(sql)
-        cur = await self._conn.cursor()
-        try:
-            await cur.execute(normalized, params or ())
-        except Exception as exc:
-            if normalized.lstrip().upper().startswith("CREATE INDEX"):
-                if hasattr(exc, "args") and exc.args:
-                    code = exc.args[0]
-                    if code == 1061:
-                        await cur.close()
-                        return _MySQLCursor(None)
+        async with self._lock:
+            cur = await self._conn.cursor()
+            try:
+                await cur.execute(normalized, params or ())
+            except Exception as exc:
+                if normalized.lstrip().upper().startswith("CREATE INDEX"):
+                    if hasattr(exc, "args") and exc.args:
+                        code = exc.args[0]
+                        if code == 1061:
+                            await cur.close()
+                            return _MySQLCursor(None)
+                await cur.close()
+                raise
+            if normalized.lstrip().upper().startswith("SELECT"):
+                return _MySQLCursor(cur)
+            lastrowid = cur.lastrowid
             await cur.close()
-            raise
-        if normalized.lstrip().upper().startswith("SELECT"):
-            return _MySQLCursor(cur)
-        lastrowid = cur.lastrowid
-        await cur.close()
-        return _MySQLCursor(None, lastrowid=lastrowid)
+            return _MySQLCursor(None, lastrowid=lastrowid)
 
     async def executemany(self, sql: str, seq):
         normalized = self._normalize_sql(sql)
-        cur = await self._conn.cursor()
-        await cur.executemany(normalized, seq)
-        await cur.close()
+        async with self._lock:
+            cur = await self._conn.cursor()
+            await cur.executemany(normalized, seq)
+            await cur.close()
 
     async def commit(self):
-        await self._conn.commit()
+        async with self._lock:
+            await self._conn.commit()
 
     async def close(self):
         self._conn.close()
