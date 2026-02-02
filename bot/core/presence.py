@@ -50,16 +50,25 @@ class PresenceRotator:
         return await self._fetch_count(query)
 
     async def _get_stats(self) -> dict[str, int]:
+        driver = getattr(self.db, "_driver", None) or ""
         total_tickets = await self._fetch_count("SELECT COUNT(*) FROM tickets")
         open_tickets = await self._fetch_count("SELECT COUNT(*) FROM tickets WHERE status IS NULL OR status != 'closed'")
         total_users = await self._fetch_count("SELECT COUNT(*) FROM user_stats")
         total_messages = await self._fetch_sum("SELECT COALESCE(SUM(message_count), 0) FROM user_stats")
         total_voice_hours = await self._fetch_sum("SELECT COALESCE(SUM(voice_seconds), 0) FROM user_stats") // 3600
-        active_users = await self._fetch_count(
-            "SELECT COUNT(*) FROM user_stats "
-            "WHERE (last_message_at IS NOT NULL AND datetime(last_message_at) >= datetime('now','-1 day')) "
-            "OR (last_voice_at IS NOT NULL AND datetime(last_voice_at) >= datetime('now','-1 day'))"
-        )
+        if driver == "mysql":
+            active_users_query = (
+                "SELECT COUNT(*) FROM user_stats "
+                "WHERE (last_message_at IS NOT NULL AND last_message_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)) "
+                "OR (last_voice_at IS NOT NULL AND last_voice_at >= DATE_SUB(NOW(), INTERVAL 1 DAY))"
+            )
+        else:
+            active_users_query = (
+                "SELECT COUNT(*) FROM user_stats "
+                "WHERE (last_message_at IS NOT NULL AND datetime(last_message_at) >= datetime('now','-1 day')) "
+                "OR (last_voice_at IS NOT NULL AND datetime(last_voice_at) >= datetime('now','-1 day'))"
+            )
+        active_users = await self._fetch_count(active_users_query)
         warns = await self._fetch_count("SELECT COUNT(*) FROM infractions WHERE action = 'warn'")
         giveaways_open = await self._fetch_count("SELECT COUNT(*) FROM giveaways WHERE status = 'open'")
         polls_open = await self._fetch_count("SELECT COUNT(*) FROM polls WHERE status = 'open'")
