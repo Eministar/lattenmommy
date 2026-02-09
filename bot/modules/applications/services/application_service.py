@@ -1,3 +1,4 @@
+import time
 import discord
 from bot.core.perms import is_staff
 from bot.modules.applications.formatting.application_embeds import (
@@ -18,6 +19,25 @@ class ApplicationService:
         self.logger = logger
         self._sessions: dict[int, dict] = {}
         self._followups: dict[int, list[dict]] = {}
+        self._recent_dm_users: dict[int, float] = {}
+
+    def _mark_dm_handled(self, user_id: int):
+        self._recent_dm_users[int(user_id)] = time.monotonic()
+
+    def is_dm_reserved(self, user_id: int) -> bool:
+        uid = int(user_id)
+        if uid in self._sessions:
+            return True
+        pending = self._followups.get(uid) or []
+        if pending:
+            return True
+        last = self._recent_dm_users.get(uid)
+        if last is None:
+            return False
+        if time.monotonic() - last < 15:
+            return True
+        self._recent_dm_users.pop(uid, None)
+        return False
 
     def _config(self) -> dict:
         return self.settings.get("applications", {}) or {}
@@ -68,6 +88,7 @@ class ApplicationService:
             item = pending.pop(0)
             if not pending:
                 self._followups.pop(user_id, None)
+            self._mark_dm_handled(user_id)
             question = str(item.get("question") or "").strip()
             guild_id = int(item.get("guild_id") or 0)
             thread_id = int(item.get("thread_id") or 0)
@@ -107,6 +128,7 @@ class ApplicationService:
         text = (message.content or "").strip()
         if not text:
             return
+        self._mark_dm_handled(user_id)
         sess["answers"].append(text)
         sess["idx"] += 1
         idx = int(sess["idx"])
@@ -171,6 +193,13 @@ class ApplicationService:
         thread = created.thread
 
         app_id = await self.db.create_application(guild.id, interaction.user.id, thread.id, questions, answers)
+        if app_id:
+            try:
+                starter = getattr(created, "message", None)
+                if starter:
+                    await starter.edit(view=ApplicationDecisionView(app_id=int(app_id)))
+            except Exception:
+                pass
         await self.logger.emit(
             self.bot,
             "application_created",

@@ -37,15 +37,30 @@ class ApplicationDecisionButton(
         if not service:
             return await interaction.response.send_message("Application-Service nicht bereit.", ephemeral=True)
 
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+
         accepted = self.decision == "accept"
         ok, err = await service.decide_application(interaction, self.app_id, accepted)
         if not ok:
-            return await interaction.response.send_message(f"Aktion fehlgeschlagen: {err}", ephemeral=True)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(f"Aktion fehlgeschlagen: {err}", ephemeral=True)
+                else:
+                    await interaction.response.send_message(f"Aktion fehlgeschlagen: {err}", ephemeral=True)
+            except Exception:
+                pass
+            return
 
         try:
-            await interaction.response.send_message("Entscheidung gespeichert.", ephemeral=True)
-        except discord.InteractionResponded:
-            await interaction.followup.send("Entscheidung gespeichert.", ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send("Entscheidung gespeichert.", ephemeral=True)
+            else:
+                await interaction.response.send_message("Entscheidung gespeichert.", ephemeral=True)
+        except Exception:
+            pass
 
         if interaction.message:
             view = ApplicationDecisionView(self.app_id)

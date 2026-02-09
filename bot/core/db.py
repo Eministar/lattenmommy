@@ -139,12 +139,12 @@ class Database:
         normalized = normalized.replace("INSERT OR IGNORE", "INSERT IGNORE")
         normalized = normalized.replace("INSERT OR REPLACE", "REPLACE")
         normalized = re.sub(
-            r"ON\\s+CONFLICT\\s*\\([^\\)]*\\)\\s+DO\\s+UPDATE\\s+SET",
+            r"ON\s+CONFLICT\s*\([^\)]*\)\s+DO\s+UPDATE\s+SET",
             "ON DUPLICATE KEY UPDATE",
             normalized,
             flags=re.IGNORECASE,
         )
-        normalized = re.sub(r"excluded\\.([A-Za-z0-9_]+)", r"VALUES(\\1)", normalized)
+        normalized = re.sub(r"excluded\.([A-Za-z0-9_]+)", r"VALUES(\1)", normalized, flags=re.IGNORECASE)
         normalized = normalized.replace("last_insert_rowid()", "LAST_INSERT_ID()")
         normalized = normalized.replace("?", "%s")
         return normalized
@@ -154,18 +154,18 @@ class Database:
             return sql
         normalized = sql
         normalized = re.sub(
-            r"CREATE\\s+INDEX\\s+IF\\s+NOT\\s+EXISTS",
+            r"CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS",
             "CREATE INDEX",
             normalized,
             flags=re.IGNORECASE,
         )
         normalized = re.sub(
-            r"INTEGER\\s+PRIMARY\\s+KEY\\s+AUTOINCREMENT",
+            r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT",
             "BIGINT AUTO_INCREMENT PRIMARY KEY",
             normalized,
             flags=re.IGNORECASE,
         )
-        normalized = re.sub(r"\\bINTEGER\\b", "BIGINT", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\bINTEGER\b", "BIGINT", normalized, flags=re.IGNORECASE)
         normalized = normalized.replace("AUTOINCREMENT", "AUTO_INCREMENT")
         return normalized
 

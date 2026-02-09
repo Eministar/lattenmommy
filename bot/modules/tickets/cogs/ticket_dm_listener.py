@@ -16,4 +16,11 @@ class TicketDMListener(commands.Cog):
             return
         if not isinstance(message.channel, discord.DMChannel):
             return
+        app_service = getattr(self.bot, "application_service", None)
+        if app_service and getattr(app_service, "is_dm_reserved", None):
+            try:
+                if app_service.is_dm_reserved(message.author.id):
+                    return
+            except Exception:
+                pass
         await self.service.handle_dm(message)
