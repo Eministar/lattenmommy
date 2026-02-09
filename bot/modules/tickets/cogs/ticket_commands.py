@@ -120,9 +120,22 @@ class TicketCommands(commands.Cog):
     async def _build_support_panel_stats(self) -> dict:
         total = await self._fetch_count("SELECT COUNT(*) FROM tickets")
         open_ = await self._fetch_count("SELECT COUNT(*) FROM tickets WHERE status IS NULL OR status != 'closed'")
-        active = await self._fetch_count(
-            "SELECT COUNT(*) FROM user_stats "
-            "WHERE (last_message_at IS NOT NULL AND datetime(last_message_at) >= datetime('now','-1 day')) "
-            "OR (last_voice_at IS NOT NULL AND datetime(last_voice_at) >= datetime('now','-1 day'))"
-        )
+        driver = getattr(self.bot.db, "_driver", "sqlite")
+        if driver == "mysql":
+            active_query = (
+                "SELECT COUNT(*) FROM user_stats "
+                "WHERE (last_message_at IS NOT NULL AND "
+                "STR_TO_DATE(REPLACE(SUBSTRING(last_message_at,1,19),'T',' '), '%Y-%m-%d %H:%i:%s') "
+                ">= (UTC_TIMESTAMP() - INTERVAL 1 DAY)) "
+                "OR (last_voice_at IS NOT NULL AND "
+                "STR_TO_DATE(REPLACE(SUBSTRING(last_voice_at,1,19),'T',' '), '%Y-%m-%d %H:%i:%s') "
+                ">= (UTC_TIMESTAMP() - INTERVAL 1 DAY))"
+            )
+        else:
+            active_query = (
+                "SELECT COUNT(*) FROM user_stats "
+                "WHERE (last_message_at IS NOT NULL AND datetime(last_message_at) >= datetime('now','-1 day')) "
+                "OR (last_voice_at IS NOT NULL AND datetime(last_voice_at) >= datetime('now','-1 day'))"
+            )
+        active = await self._fetch_count(active_query)
         return {"total": total, "open_": open_, "active": active}
