@@ -72,6 +72,7 @@ class BeichteService:
         if forum:
             await self.settings.set_guild_override(self.db, guild.id, "beichte.forum_channel_id", int(forum.id))
         await self._ensure_main_thread(guild, forum_channel)
+        await self._refresh_user_threads(guild)
         await interaction.response.send_message("Info aktualisiert.", ephemeral=True)
 
     async def submit_entry(self, interaction: discord.Interaction, anonymous: bool, content: str):
@@ -189,3 +190,48 @@ class BeichteService:
                 await msg.pin()
             except Exception:
                 pass
+
+    async def _refresh_user_threads(self, guild: discord.Guild, limit: int = 2000):
+        try:
+            rows = await self.db.list_beichte_threads(guild.id, limit=limit)
+        except Exception:
+            return
+        for row in rows:
+            if not row:
+                continue
+            try:
+                thread_id = int(row[0])
+            except Exception:
+                continue
+            thread = await self._get_thread(guild, thread_id)
+            if not thread:
+                continue
+            await self._refresh_thread_info_message(guild, thread)
+
+    async def _refresh_thread_info_message(self, guild: discord.Guild, thread: discord.Thread):
+        info_view = discord.ui.LayoutView(timeout=None)
+        info_container = build_thread_info_container(self.settings, guild)
+        info_view.add_item(info_container)
+
+        target = None
+        try:
+            pins = await thread.pins()
+            for msg in pins:
+                if msg.author and self.bot.user and msg.author.id == self.bot.user.id and msg.components:
+                    target = msg
+                    break
+        except Exception:
+            target = None
+
+        if target:
+            try:
+                await target.edit(view=info_view)
+                return
+            except Exception:
+                pass
+
+        try:
+            msg = await thread.send(view=info_view)
+            await msg.pin()
+        except Exception:
+            pass

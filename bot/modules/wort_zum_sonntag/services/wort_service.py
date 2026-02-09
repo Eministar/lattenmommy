@@ -157,6 +157,7 @@ class WortZumSonntagService:
         if forum:
             await self.settings.set_guild_override(self.db, guild.id, "wzs.forum_channel_id", int(forum.id))
         await self._ensure_main_thread(guild, forum_channel)
+        await self._refresh_all_submissions(guild)
         await interaction.response.send_message("Info + Panel aktualisiert.", ephemeral=True)
 
     async def submit_wisdom(self, interaction: discord.Interaction, content: str):
@@ -320,6 +321,23 @@ class WortZumSonntagService:
         if not panel_message_id:
             msg = await thread.send(view=panel_view)
             await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_message_id", int(msg.id))
+
+    async def _refresh_all_submissions(self, guild: discord.Guild, limit: int = 2000):
+        try:
+            rows = await self.db.list_wzs_submissions(guild.id, limit=limit)
+        except Exception:
+            return
+        for row in rows:
+            if not row:
+                continue
+            try:
+                submission_id = int(row[0])
+            except Exception:
+                continue
+            try:
+                await self._refresh_submission_message(guild, submission_id)
+            except Exception:
+                pass
 
     async def _refresh_submission_message(self, guild: discord.Guild, submission_id: int):
         row = await self.db.get_wzs_submission(int(submission_id))

@@ -1554,6 +1554,19 @@ class Database:
         )
         return await cur.fetchone()
 
+    async def list_seelsorge_threads(self, guild_id: int, limit: int = 2000):
+        cur = await self._conn.execute(
+            """
+            SELECT thread_id
+            FROM seelsorge_threads
+            WHERE guild_id = ?
+            ORDER BY created_at ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
+
     async def create_beichte_thread(
         self,
         guild_id: int,
@@ -1590,6 +1603,19 @@ class Database:
             (int(guild_id), int(thread_id)),
         )
         return await cur.fetchone()
+
+    async def list_beichte_threads(self, guild_id: int, limit: int = 2000):
+        cur = await self._conn.execute(
+            """
+            SELECT thread_id
+            FROM beichte_threads
+            WHERE guild_id = ?
+            ORDER BY created_at ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
 
     async def get_anonymous_identity(self, guild_id: int, thread_id: int, user_id: int):
         cur = await self._conn.execute(
@@ -1852,6 +1878,19 @@ class Database:
             (int(submission_id),),
         )
         return await cur.fetchone()
+
+    async def list_wzs_submissions(self, guild_id: int, limit: int = 2000):
+        cur = await self._conn.execute(
+            """
+            SELECT id
+            FROM wzs_submissions
+            WHERE guild_id = ?
+            ORDER BY id ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
 
     async def get_wzs_submission_by_thread(self, guild_id: int, thread_id: int):
         cur = await self._conn.execute(

@@ -39,6 +39,16 @@ def _apply_banner(emb: discord.Embed):
     emb.set_image(url=Banners.APPLICATION)
 
 
+def _add_panel_banner(container: discord.ui.Container):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.APPLICATION)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
 def build_application_embed(settings, guild: discord.Guild | None, user: discord.User, questions: list[str], answers: list[str]):
     info = em(settings, "info", guild) or "ℹ️"
     arrow2 = em(settings, "arrow2", guild) or "»"
@@ -134,6 +144,7 @@ def build_application_panel_container(
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_panel_banner(container)
     container.add_item(discord.ui.TextDisplay(f"{header}\n{intro}\n\n{cta}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(f"**Ablauf**\n{flow}"))

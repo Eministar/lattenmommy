@@ -346,6 +346,7 @@ def build_support_panel_embed(
         ),
         color=_color(settings, guild),
     )
+    emb.set_image(url=Banners.SUPPORT)
     emb.add_field(
         name="So funktioniert es",
         value=(
@@ -369,6 +370,16 @@ def build_support_panel_embed(
         emb.set_thumbnail(url=guild.icon.url)
     _footer(emb, settings, guild)
     return emb
+
+
+def _add_support_panel_banner(container: discord.ui.Container):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.SUPPORT)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
 
 
 def build_support_panel_container(
@@ -400,6 +411,7 @@ def build_support_panel_container(
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_support_panel_banner(container)
     container.add_item(discord.ui.TextDisplay(f"{header}\n{intro}\n\n{cta}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(f"**So funktioniert es**\n{flow}"))
