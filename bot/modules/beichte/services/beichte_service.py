@@ -161,6 +161,13 @@ class BeichteService:
                 pass
             return
 
+        desired_name = self._info_thread_name(guild.id)
+        if desired_name and str(getattr(thread, "name", "")) != str(desired_name):
+            try:
+                await thread.edit(name=desired_name)
+            except Exception:
+                pass
+
         await self.settings.set_guild_override(self.db, guild.id, "beichte.info_thread_id", int(thread.id))
 
         info_message_id = self._gi(guild.id, "beichte.info_message_id", 0)
@@ -182,4 +189,3 @@ class BeichteService:
                 await msg.pin()
             except Exception:
                 pass
-

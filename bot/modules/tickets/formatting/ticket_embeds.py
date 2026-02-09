@@ -2,6 +2,7 @@ import discord
 from discord.utils import format_dt
 from datetime import datetime
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 def parse_hex_color(value: str, default: int = 0xB16B91) -> int:
@@ -73,6 +74,7 @@ def build_summary_embed(
         color=_color(settings, guild),
     )
     emb.set_thumbnail(url=user.display_avatar.url)
+    emb.set_image(url=Banners.TICKETS_STAFF)
     _footer(emb, settings, guild)
     return emb
 
@@ -117,6 +119,7 @@ def build_dm_ticket_created_embed(settings, guild: discord.Guild | None, ticket_
         description=desc,
         color=_color(settings, guild),
     )
+    emb.set_image(url=Banners.TICKETS_OPENED)
     _footer(emb, settings, guild)
     return emb
 
@@ -157,6 +160,7 @@ def build_dm_staff_reply_embed(settings, guild: discord.Guild | None, staff: dis
         color=_color(settings, guild),
     )
     emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
+    emb.set_image(url=Banners.TICKETS_ANSWER)
     _footer(emb, settings, guild)
     return emb
 
@@ -178,6 +182,7 @@ def build_dm_ticket_closed_embed(settings, guild: discord.Guild | None, ticket_i
         description=desc,
         color=_color(settings, guild),
     )
+    emb.set_image(url=Banners.TICKETS_CLOSED)
     _footer(emb, settings, guild)
     return emb
 
@@ -219,7 +224,14 @@ def build_dm_ticket_added_embed(settings, guild: discord.Guild | None, ticket_id
     return emb
 
 
-def build_thread_status_embed(settings, guild: discord.Guild | None, title: str, text: str, actor: discord.Member | None = None):
+def build_thread_status_embed(
+    settings,
+    guild: discord.Guild | None,
+    title: str,
+    text: str,
+    actor: discord.Member | None = None,
+    banner_url: str | None = None,
+):
     arrow2 = em(settings, "arrow2", guild)
     emb = discord.Embed(
         title=title,
@@ -228,6 +240,8 @@ def build_thread_status_embed(settings, guild: discord.Guild | None, title: str,
     )
     if actor:
         emb.set_author(name=actor.display_name, icon_url=actor.display_avatar.url)
+    if banner_url:
+        emb.set_image(url=banner_url)
     _footer(emb, settings, guild)
     return emb
 

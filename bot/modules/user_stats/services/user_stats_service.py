@@ -4,6 +4,7 @@ import math
 from datetime import datetime, timezone
 import discord
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 class UserStatsService:
@@ -568,6 +569,7 @@ class UserStatsService:
             f"┗`💜` - Du bist stark unterwegs! {hearts}"
         )
         emb = discord.Embed(title=title, description=desc, color=member.color or 0xB16B91)
+        emb.set_image(url=Banners.ACHIEVEMENT_COMPLETE)
         return emb
 
     async def build_me_embed(self, member: discord.Member):
@@ -639,6 +641,7 @@ class UserStatsService:
             ),
         )
         embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_image(url=Banners.ACHIEVEMENT)
         return embed
 
     async def build_achievements_embed(self, member: discord.Member, page: int = 1, per_page: int = 8):
@@ -734,6 +737,7 @@ class UserStatsService:
             ),
             color=self._embed_color(member),
         )
+        emb.set_image(url=Banners.ACHIEVEMENT)
         emb.set_footer(text=f"Seite {page}/{total_pages} • {len(unlocked)}/{total} freigeschaltet")
         return emb, page, total_pages
 

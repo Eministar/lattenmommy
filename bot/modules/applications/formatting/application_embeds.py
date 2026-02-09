@@ -1,5 +1,6 @@
 import discord
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 def parse_hex_color(value: str, default: int = 0xB16B91) -> int:
@@ -34,12 +35,17 @@ def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
             emb.set_footer(text=str(ft))
 
 
+def _apply_banner(emb: discord.Embed):
+    emb.set_image(url=Banners.APPLICATION)
+
+
 def build_application_embed(settings, guild: discord.Guild | None, user: discord.User, questions: list[str], answers: list[str]):
     info = em(settings, "info", guild) or "ℹ️"
     arrow2 = em(settings, "arrow2", guild) or "»"
     desc = f"{arrow2} Neue Bewerbung eingegangen. Bitte prüft die Antworten sorgfältig."
     emb = discord.Embed(title=f"{info} 𑁉 BEWERBUNG", description=desc, color=_color(settings, guild))
     emb.set_author(name=user.display_name, icon_url=user.display_avatar.url)
+    _apply_banner(emb)
     for idx, q in enumerate(questions):
         a = answers[idx] if idx < len(answers) else "-"
         emb.add_field(name=f"{idx + 1}. {q}", value=a[:1024] or "-", inline=False)
@@ -53,6 +59,7 @@ def build_application_dm_embed(settings, guild: discord.Guild | None, questions:
     lines = [f"{i+1}. {q}" for i, q in enumerate(questions)]
     desc = f"{arrow2} Bitte beantworte die folgenden Fragen – klar und ehrlich.\n\n" + "\n".join(lines)
     emb = discord.Embed(title=f"{info} 𑁉 BEWERBUNG STARTEN", description=desc, color=_color(settings, guild))
+    _apply_banner(emb)
     _footer(emb, settings, guild)
     return emb
 
@@ -75,6 +82,7 @@ def build_application_panel_embed(
         ),
         color=_color(settings, guild),
     )
+    _apply_banner(emb)
     emb.add_field(
         name="Ablauf",
         value=(
@@ -151,6 +159,7 @@ def build_application_followup_dm_embed(
         "Bitte antworte direkt hier in der DM."
     )
     emb = discord.Embed(title=title, description=desc, color=_color(settings, guild))
+    _apply_banner(emb)
     emb.add_field(name="FRAGE", value=f"**{question.strip()}**", inline=False)
     emb.add_field(
         name="DEIN BEDÜRFNIS",
@@ -174,6 +183,7 @@ def build_application_followup_answer_embed(
     pen = em(settings, "pen", guild) or "📝"
     desc = f"{arrow2} Rückfrage beantwortet von {user.mention}."
     emb = discord.Embed(title=f"{pen} 𑁉 RÜCKFRAGE BEANTWORTET", description=desc, color=_color(settings, guild))
+    _apply_banner(emb)
     emb.add_field(name="FRAGE", value=question.strip()[:1024], inline=False)
     emb.add_field(name="ANTWORT", value=answer.strip()[:1024], inline=False)
     emb.set_author(name=user.display_name, icon_url=user.display_avatar.url)
@@ -192,6 +202,7 @@ def build_application_decision_embed(
     status_text = "ANGENOMMEN" if accepted else "ABGELEHNT"
     desc = f"{arrow2} Entscheidung wurde gespeichert: **{status_text}**."
     emb = discord.Embed(title=f"{badge} 𑁉 BEWERBUNG {status_text}", description=desc, color=_color(settings, guild))
+    _apply_banner(emb)
     if staff:
         emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
     _footer(emb, settings, guild)

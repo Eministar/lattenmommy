@@ -4,6 +4,7 @@ from datetime import datetime
 import discord
 from discord.utils import format_dt
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 DEFAULT_COLOR = 0xB16B91
@@ -85,12 +86,23 @@ def _default_help_text(settings, guild: discord.Guild | None) -> str:
     )
 
 
+def _add_banner(container: discord.ui.Container):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.SEELSORGE)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
 def build_info_container(settings, guild: discord.Guild | None):
     header = f"**🧠 𑁉 SEELSORGE – INFO**"
     info_text = _g(settings, guild, "seelsorge.info_text", _default_info_text(settings, guild))
     help_text = _g(settings, guild, "seelsorge.help_text", _default_help_text(settings, guild))
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
     container.add_item(discord.ui.TextDisplay(f"{header}\n{info_text}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(help_text))
@@ -115,6 +127,7 @@ def build_panel_container(settings, guild: discord.Guild | None, submit_button: 
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
     container.add_item(discord.ui.TextDisplay(f"{header}\n{steps}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(rules))
@@ -146,6 +159,7 @@ def build_submission_view(settings, guild: discord.Guild | None, data: dict) -> 
 
     view = discord.ui.LayoutView(timeout=None)
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
     container.add_item(discord.ui.TextDisplay(f"{header}\n{meta}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(body))
@@ -165,5 +179,6 @@ def build_thread_info_container(settings, guild: discord.Guild | None):
         "Akute Gefahr: **112** · TelefonSeelsorge: **116 123**"
     )
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
     container.add_item(discord.ui.TextDisplay(text))
     return container

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import traceback
 import discord
+from bot.utils.assets import Banners
 from discord.utils import format_dt
 from bot.utils.emojis import em
 
@@ -341,6 +342,7 @@ def build_bot_error_embed(settings, guild: discord.Guild | None, where: str, err
     )
 
     emb = discord.Embed(title=f"{red} 𑁉 BOT FEHLER", description=desc, color=_color(settings, guild))
+    emb.set_image(url=Banners.BOT_ERROR)
     _footer(emb, settings, guild)
     return emb
 

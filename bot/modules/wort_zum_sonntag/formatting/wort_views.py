@@ -4,6 +4,7 @@ from datetime import datetime
 import discord
 from discord.utils import format_dt
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 DEFAULT_COLOR = 0xB16B91
@@ -59,6 +60,25 @@ def _status_label(settings, guild: discord.Guild | None, status: str) -> tuple[s
     if s == "posted":
         return "GEPOSTET", book
     return "ERWARTET", orange
+
+
+def _add_banner(container: discord.ui.Container, banner_url: str):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=banner_url)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
+def _banner_for_status(status: str) -> str:
+    s = str(status or "pending").lower()
+    if s in {"accepted", "posted"}:
+        return Banners.WZM_ACCEPTED
+    if s == "rejected":
+        return Banners.WZM_DENIED
+    return Banners.WZM_WAITING
 
 
 def build_panel_container(settings, guild: discord.Guild | None, submit_button: discord.ui.Button):
@@ -122,6 +142,7 @@ def build_info_container(settings, guild: discord.Guild | None, ping_button: dis
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.WZM_BANNER)
     container.add_item(discord.ui.TextDisplay(f"{title}\n{desc}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(rules))
@@ -169,6 +190,7 @@ def build_submission_view(settings, guild: discord.Guild | None, data: dict) -> 
 
     view = discord.ui.LayoutView(timeout=None)
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, _banner_for_status(status))
     container.add_item(discord.ui.TextDisplay(f"{header}\n{meta}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(quote))

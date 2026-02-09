@@ -2,6 +2,7 @@ import discord
 from discord.utils import format_dt
 from datetime import datetime
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 DEFAULT_COLOR = 0xB16B91
@@ -117,6 +118,7 @@ def build_parliament_panel_embed(
         description=desc,
         color=_color(settings, guild),
     )
+    emb.set_image(url=Banners.PARLIAMENT)
     emb.add_field(
         name="Feste Mitglieder (Leitung)",
         value=leaders_block,
@@ -173,6 +175,7 @@ def build_parliament_vote_embed(
         description=desc,
         color=_color(settings, guild),
     )
+    emb.set_image(url=Banners.ELECTION)
     if created_at:
         emb.set_footer(text=f"Start: {format_dt(created_at, style='f')}")
     return emb

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import discord
+from bot.utils.assets import Banners
 
 
 class InviteService:
@@ -72,6 +73,7 @@ class InviteService:
             description=desc,
             color=self._color(guild),
         )
+        emb.set_image(url=Banners.INVITE)
         emb.set_thumbnail(url=member.display_avatar.url)
         try:
             await ch.send(embed=emb)

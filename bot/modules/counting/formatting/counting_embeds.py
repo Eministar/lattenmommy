@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import discord
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 def parse_hex_color(value: str | None, default: int = 0xB16B91) -> int:
@@ -36,6 +37,10 @@ def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
             emb.set_footer(text=str(ft))
 
 
+def _apply_banner(emb: discord.Embed):
+    emb.set_image(url=Banners.COUNTING)
+
+
 def build_counting_fail_embed(
     settings,
     guild: discord.Guild | None,
@@ -65,6 +70,7 @@ def build_counting_fail_embed(
         description=desc,
         color=_color(settings, guild),
     )
+    _apply_banner(emb)
     _footer(emb, settings, guild)
     return emb
 
@@ -93,6 +99,7 @@ def build_counting_milestone_embed(
         description=desc,
         color=_color(settings, guild),
     )
+    _apply_banner(emb)
     _footer(emb, settings, guild)
     return emb
 
@@ -117,5 +124,6 @@ def build_counting_record_embed(
         description=desc,
         color=_color(settings, guild),
     )
+    _apply_banner(emb)
     _footer(emb, settings, guild)
     return emb

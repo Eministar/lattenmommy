@@ -1,5 +1,6 @@
 import random
 import discord
+from bot.utils.assets import Banners
 
 
 class WelcomeService:
@@ -95,6 +96,7 @@ class WelcomeService:
         )
         emb = discord.Embed(title=title, description=desc, color=self._embed_color(member))
         emb.set_thumbnail(url=member.display_avatar.url)
+        emb.set_image(url=Banners.WELCOME)
         footer = str(self.settings.get_guild(guild.id, "design.footer_text", "") or "").strip()
         if footer:
             emb.set_footer(text=footer)

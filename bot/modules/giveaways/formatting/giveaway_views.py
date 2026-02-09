@@ -4,6 +4,7 @@ import discord
 from datetime import datetime
 from discord.utils import format_dt
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 DEFAULT_COLOR = 0xB16B91
@@ -55,6 +56,13 @@ def build_giveaway_container(
     status_line = f"{info} Status: **{status_label}**"
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.GIVEAWAY)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
     container.add_item(discord.ui.TextDisplay(f"{header}\n{intro}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay("\n".join(details)))

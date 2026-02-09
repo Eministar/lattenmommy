@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 import discord
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 class PollService:
@@ -58,6 +59,7 @@ class PollService:
             description=desc,
             color=self._color(guild),
         )
+        emb.set_image(url=Banners.POLL)
         emb.set_footer(text=f"ID {poll_id} • {created_at}")
         return emb
 
@@ -85,6 +87,13 @@ class PollService:
         desc = f"{arrow2} {question}\n\n" + "\n\n".join(lines)
 
         container = discord.ui.Container(accent_colour=self._color(guild))
+        try:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=Banners.POLL)
+            container.add_item(gallery)
+            container.add_item(discord.ui.Separator())
+        except Exception:
+            pass
         container.add_item(discord.ui.TextDisplay(f"**{info} 𑁉 UMFRAGE • {status_label}**"))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(desc))

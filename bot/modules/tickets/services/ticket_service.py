@@ -27,6 +27,7 @@ from bot.modules.tickets.formatting.ticket_embeds import (
     build_dm_ticket_forwarded_embed,
 )
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 _USER_ID_RE = re.compile(r"User-ID:\s*(\d{15,20})")
 
@@ -388,6 +389,8 @@ class TicketService:
             except Exception as e:
                 return False, f"{type(e).__name__}: {e}"
             emb = build_dm_ticket_update_embed(self.settings, guild, title, text)
+            if "geschlossen" in str(title or "").lower():
+                emb.set_image(url=Banners.TICKETS_CLOSED)
             try:
                 await user.send(embed=emb)
                 return True, None
@@ -515,6 +518,8 @@ class TicketService:
 
         emb = discord.Embed(title=title, description=desc, color=color)
         emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
+        if claimed:
+            emb.set_image(url=Banners.TICKETS_CLAIM)
         if ft:
             bot_member = getattr(guild, "me", None)
             if bot_member:
@@ -900,7 +905,8 @@ class TicketService:
                     "┏`📩` - Schreib einfach hier rein\n"
                     "┗`🧾` - Ich kümmere mich jetzt darum."
                 ),
-                interaction.user
+                interaction.user,
+                banner_url=Banners.TICKETS_CLAIM,
             )
 
             await thread.send(embed=emb)
@@ -1082,7 +1088,14 @@ class TicketService:
             body = f"{actor.mention} kümmert sich nicht mehr um dieses Ticket."
 
         try:
-            emb = build_thread_status_embed(self.settings, guild, title, body, actor)
+            emb = build_thread_status_embed(
+                self.settings,
+                guild,
+                title,
+                body,
+                actor,
+                banner_url=Banners.TICKETS_CLAIM if claimed else None,
+            )
             await thread.send(embed=emb)
         except Exception:
             pass
@@ -1156,7 +1169,14 @@ class TicketService:
         elif transcript_error:
             status_text += "\n\n⚠️ Transcript konnte nicht per DM gesendet werden."
         try:
-            emb = build_thread_status_embed(self.settings, guild, "🔒 Ticket geschlossen", status_text, actor)
+            emb = build_thread_status_embed(
+                self.settings,
+                guild,
+                "🔒 Ticket geschlossen",
+                status_text,
+                actor,
+                banner_url=Banners.TICKETS_CLOSED,
+            )
             await thread.send(embed=emb)
         except Exception:
             pass
@@ -1257,7 +1277,14 @@ class TicketService:
         if not dm_ok:
             status_text += "\n\n⚠️ User konnte nicht per DM erreicht werden."
         try:
-            emb = build_thread_status_embed(self.settings, interaction.guild, "🔒 Ticket geschlossen", status_text, interaction.user)
+            emb = build_thread_status_embed(
+                self.settings,
+                interaction.guild,
+                "🔒 Ticket geschlossen",
+                status_text,
+                interaction.user,
+                banner_url=Banners.TICKETS_CLOSED,
+            )
             await thread.send(embed=emb)
         except Exception:
             pass
@@ -1970,6 +1997,7 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
                                 "🔒 Auto-Close",
                                 "Ticket wurde wegen Inaktivität geschlossen.",
                                 None,
+                                banner_url=Banners.TICKETS_CLOSED,
                             )
                             await thread.send(embed=emb)
                             await thread.edit(archived=True, locked=True)

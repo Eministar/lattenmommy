@@ -1,5 +1,6 @@
 import discord
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 
 
 def parse_hex_color(value: str, default: int = 0xB16B91) -> int:
@@ -32,6 +33,10 @@ def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
             emb.set_footer(text=bot_member.display_name, icon_url=bot_member.display_avatar.url)
         else:
             emb.set_footer(text=str(ft))
+
+
+def _apply_banner(emb: discord.Embed):
+    emb.set_image(url=Banners.TEMPVOICE)
 
 
 def _region_label(region: str | None) -> str:
@@ -72,6 +77,7 @@ def build_tempvoice_panel_embed(
         description=desc,
         color=_color(settings, guild),
     )
+    _apply_banner(emb)
     emb.set_thumbnail(url=owner.display_avatar.url)
     _footer(emb, settings, guild)
     return emb

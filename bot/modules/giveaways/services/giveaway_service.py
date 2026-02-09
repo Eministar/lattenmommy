@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone, timedelta
 import discord
 from bot.utils.emojis import em
+from bot.utils.assets import Banners
 from bot.modules.giveaways.formatting.giveaway_views import build_giveaway_container
 
 
@@ -177,6 +178,7 @@ class GiveawayService:
             description=desc,
             color=self._color(guild),
         )
+        emb.set_image(url=Banners.GIVEAWAY)
         return emb
         return giveaway_id
 
@@ -210,6 +212,7 @@ class GiveawayService:
             description=desc,
             color=self._color(guild),
         )
+        emb.set_image(url=Banners.GIVEAWAY)
         emb.set_footer(text=f"ID {giveaway_id}")
         return emb
 
