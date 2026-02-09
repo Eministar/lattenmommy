@@ -58,13 +58,12 @@ def _status_label(settings, guild: discord.Guild | None, status: str) -> tuple[s
         return "ABGELEHNT", red
     if s == "posted":
         return "GEPOSTET", book
-    return "WARTET AUF PRÜFUNG", orange
+    return "ERWARTET", orange
 
 
 def build_panel_container(settings, guild: discord.Guild | None, submit_button: discord.ui.Button):
     arrow2 = em(settings, "arrow2", guild) or "»"
     book = em(settings, "book", guild) or "📖"
-    sparkles = em(settings, "sparkles", guild) or "✨"
 
     header = f"**{book} 𑁉 WORT ZUM SONNTAG**"
     intro = (
@@ -79,8 +78,11 @@ def build_panel_container(settings, guild: discord.Guild | None, submit_button: 
         "┗`📅` - Sonntagspost wird gewählt"
     )
     rules = (
-        f"{sparkles} **Kurz, klar, respektvoll.**\n"
-        "Keine Werbung oder beleidigende Inhalte."
+        "**Regeln für Einsendungen**\n"
+        "┏`✅` - Kurz & verständlich (1–3 Sätze)\n"
+        "┣`🚫` - Keine Beleidigungen, Hass oder NSFW\n"
+        "┣`🚫` - Keine Werbung, Links oder Spam\n"
+        "┗`🚫` - Keine privaten Daten"
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
@@ -105,12 +107,24 @@ def build_info_container(settings, guild: discord.Guild | None, ping_button: dis
         f"{arrow2} Dieses Forum sammelt Weisheiten aus der Community.\n\n"
         "┏`📅` - Jeden Sonntag wird eine Weisheit ausgewählt\n"
         "┣`📣` - Sie wird im Ziel-Channel gepostet\n"
-        "┗`🧩` - Einreichung erfolgt über den Button im Panel\n\n"
+        "┗`🧩` - Einreichung erfolgt über den Button im Panel"
+    )
+    rules = (
+        "**Was ist erlaubt?**\n"
+        "┏`✅` - Eigene, kurze Weisheiten\n"
+        "┣`✅` - Respektvoll & allgemein verständlich\n"
+        "┗`✅` - Keine Trigger/NSFW-Inhalte\n\n"
+        "**Was ist nicht erlaubt?**\n"
+        "┏`🚫` - Beleidigungen, Hate, Diskriminierung\n"
+        "┣`🚫` - Werbung, Links, Spam\n"
+        "┗`🚫` - Private Daten oder Doxxing\n\n"
         f"{heart} Danke fürs Teilen deiner Gedanken."
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
     container.add_item(discord.ui.TextDisplay(f"{title}\n{desc}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(rules))
     row = discord.ui.ActionRow()
     row.add_item(ping_button)
     container.add_item(row)

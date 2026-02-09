@@ -1,6 +1,31 @@
 import io
+import re
 import discord
 from discord.ext import commands
+
+_CUSTOM_EMOJI_RE = re.compile(r"<(a?):([A-Za-z0-9_]+):(\d{15,20})>")
+
+
+def _build_custom_emoji_embeds(content: str, limit: int = 10) -> list[discord.Embed]:
+    if not content:
+        return []
+    embeds: list[discord.Embed] = []
+    seen: set[tuple[str, bool]] = set()
+    for match in _CUSTOM_EMOJI_RE.finditer(content):
+        animated = bool(match.group(1))
+        emoji_id = match.group(3)
+        key = (emoji_id, animated)
+        if key in seen:
+            continue
+        seen.add(key)
+        ext = "gif" if animated else "png"
+        url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=128&quality=lossless"
+        emb = discord.Embed()
+        emb.set_image(url=url)
+        embeds.append(emb)
+        if len(embeds) >= limit:
+            break
+    return embeds
 
 
 class SeelsorgeListener(commands.Cog):
@@ -64,7 +89,15 @@ class SeelsorgeListener(commands.Cog):
         if not anonymous:
             return
 
+        reference = None
+        if message.reference and message.reference.message_id:
+            try:
+                reference = message.to_reference(fail_if_not_exists=False)
+            except Exception:
+                reference = None
+
         content = (message.content or "").strip()
+        embeds = _build_custom_emoji_embeds(content)
         files = []
         for att in message.attachments:
             try:
@@ -81,12 +114,44 @@ class SeelsorgeListener(commands.Cog):
         except Exception:
             return
 
-        is_creator = creator_id is not None and message.author and int(message.author.id) == int(creator_id)
-        prefix = "**Anonym (Ersteller):** " if is_creator else "**Anonym:** "
+        anon_number = None
         try:
-            await thread.send(prefix + content if content else prefix, files=files)
+            anon_number = await self.bot.db.get_or_create_anonymous_number(
+                int(message.guild.id),
+                int(thread.id),
+                int(message.author.id) if message.author else 0,
+            )
+        except Exception:
+            anon_number = None
+
+        is_creator = creator_id is not None and message.author and int(message.author.id) == int(creator_id)
+        label = f"Anonym #{anon_number}" if anon_number else "Anonym"
+        if is_creator:
+            label = f"{label} (Ersteller)"
+        prefix = f"**{label}:** "
+        allowed_mentions = discord.AllowedMentions(replied_user=False)
+        try:
+            await thread.send(
+                prefix + content if content else prefix,
+                files=files or None,
+                embeds=embeds or None,
+                reference=reference,
+                allowed_mentions=allowed_mentions,
+            )
         except Exception:
             try:
-                await thread.send(prefix + content if content else prefix)
+                await thread.send(
+                    prefix + content if content else prefix,
+                    embeds=embeds or None,
+                    reference=reference,
+                    allowed_mentions=allowed_mentions,
+                )
             except Exception:
-                pass
+                try:
+                    await thread.send(
+                        prefix + content if content else prefix,
+                        reference=reference,
+                        allowed_mentions=allowed_mentions,
+                    )
+                except Exception:
+                    pass

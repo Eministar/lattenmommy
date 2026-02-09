@@ -1,6 +1,7 @@
 import os
 import asyncio
 import json
+import random
 import re
 import time
 from datetime import datetime, timezone
@@ -512,6 +513,17 @@ class Database:
             anonymous INTEGER NOT NULL,
             created_at TEXT NOT NULL,
             PRIMARY KEY (guild_id, thread_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS anonymous_identities (
+            guild_id INTEGER NOT NULL,
+            thread_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            anon_number INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, thread_id, user_id),
+            UNIQUE (guild_id, thread_id, anon_number)
         );
         """)
         await self._conn.execute("""
@@ -1578,6 +1590,89 @@ class Database:
             (int(guild_id), int(thread_id)),
         )
         return await cur.fetchone()
+
+    async def get_anonymous_identity(self, guild_id: int, thread_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT anon_number
+            FROM anonymous_identities
+            WHERE guild_id = ? AND thread_id = ? AND user_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(thread_id), int(user_id)),
+        )
+        row = await cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        try:
+            return int(row[0])
+        except Exception:
+            return None
+
+    async def get_or_create_anonymous_number(self, guild_id: int, thread_id: int, user_id: int) -> int:
+        if int(user_id) <= 0:
+            return 0
+        existing = await self.get_anonymous_identity(guild_id, thread_id, user_id)
+        if existing is not None:
+            return int(existing)
+
+        rng = random.SystemRandom()
+        for _ in range(8):
+            candidate = rng.randint(1, 9999)
+            created_at = await self.now_iso()
+            await self._conn.execute(
+                """
+                INSERT OR IGNORE INTO anonymous_identities
+                (guild_id, thread_id, user_id, anon_number, created_at)
+                VALUES (?, ?, ?, ?, ?);
+                """,
+                (
+                    int(guild_id),
+                    int(thread_id),
+                    int(user_id),
+                    int(candidate),
+                    created_at,
+                ),
+            )
+            await self._conn.commit()
+            existing = await self.get_anonymous_identity(guild_id, thread_id, user_id)
+            if existing is not None:
+                return int(existing)
+
+        cur = await self._conn.execute(
+            """
+            SELECT COALESCE(MAX(anon_number), 0)
+            FROM anonymous_identities
+            WHERE guild_id = ? AND thread_id = ?;
+            """,
+            (int(guild_id), int(thread_id)),
+        )
+        row = await cur.fetchone()
+        try:
+            fallback = int(row[0]) if row and row[0] is not None else 0
+        except Exception:
+            fallback = 0
+        fallback += 1
+        created_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT OR IGNORE INTO anonymous_identities
+            (guild_id, thread_id, user_id, anon_number, created_at)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (
+                int(guild_id),
+                int(thread_id),
+                int(user_id),
+                int(fallback),
+                created_at,
+            ),
+        )
+        await self._conn.commit()
+        existing = await self.get_anonymous_identity(guild_id, thread_id, user_id)
+        if existing is not None:
+            return int(existing)
+        return int(fallback)
 
     async def get_parliament_stats(self, guild_id: int, user_id: int):
         cur = await self._conn.execute(

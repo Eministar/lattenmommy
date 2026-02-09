@@ -79,6 +79,46 @@ class WortZumSonntagService:
             base = "User"
         return f"💡 Weisheit · {base}"[:100]
 
+    def _status_tag_name(self, status: str) -> str:
+        s = str(status or "pending")
+        if s == "accepted" or s == "posted":
+            return "Angenommen"
+        if s == "rejected":
+            return "Abgelehnt"
+        return "Erwartet"
+
+    def _status_tag_names(self) -> set[str]:
+        return {"erwartet", "angenommen", "abgelehnt"}
+
+    async def _ensure_status_tag(self, forum: discord.ForumChannel, status: str) -> discord.ForumTag | None:
+        name = self._status_tag_name(status)
+        for tag in forum.available_tags:
+            if str(tag.name).lower() == name.lower():
+                return tag
+        try:
+            return await forum.create_tag(name=name)
+        except Exception:
+            return None
+
+    async def _apply_status_tag(self, thread: discord.Thread, status: str):
+        parent = getattr(thread, "parent", None)
+        if not isinstance(parent, discord.ForumChannel):
+            return
+        tag = await self._ensure_status_tag(parent, status)
+        if not tag:
+            return
+        keep = []
+        status_names = self._status_tag_names()
+        for t in list(getattr(thread, "applied_tags", []) or []):
+            if str(t.name).lower() not in status_names:
+                keep.append(t)
+        if all(int(getattr(t, "id", 0)) != int(tag.id) for t in keep):
+            keep.append(tag)
+        try:
+            await thread.edit(applied_tags=keep)
+        except Exception:
+            pass
+
     def _can_review(self, member: discord.Member) -> bool:
         if member.guild_permissions.administrator:
             return True
@@ -139,10 +179,14 @@ class WortZumSonntagService:
         }
         view = build_submission_view(self.settings, guild, data)
 
-        res = await forum_channel.create_thread(
-            name=self._submission_thread_name(interaction.user),
-            view=view,
-        )
+        pending_tag = await self._ensure_status_tag(forum_channel, "pending")
+        thread_kwargs = {
+            "name": self._submission_thread_name(interaction.user),
+            "view": view,
+        }
+        if pending_tag:
+            thread_kwargs["applied_tags"] = [pending_tag]
+        res = await forum_channel.create_thread(**thread_kwargs)
 
         submission_id = await self.db.create_wzs_submission(
             guild.id,
@@ -243,6 +287,13 @@ class WortZumSonntagService:
             await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_message_id", int(panel_msg.id))
             return
 
+        desired_name = self._panel_thread_name(guild.id)
+        if desired_name and str(getattr(thread, "name", "")) != str(desired_name):
+            try:
+                await thread.edit(name=desired_name)
+            except Exception:
+                pass
+
         await self.settings.set_guild_override(self.db, guild.id, "wzs.panel_thread_id", int(thread.id))
         await self.settings.set_guild_override(self.db, guild.id, "wzs.info_thread_id", int(thread.id))
 
@@ -311,3 +362,4 @@ class WortZumSonntagService:
             await msg.edit(view=view)
         except Exception:
             pass
+        await self._apply_status_tag(thread, data.status)
