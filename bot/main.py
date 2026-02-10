@@ -85,6 +85,8 @@ async def main():
     async def _run_bot():
         try:
             await bot.start(token)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             print(f"[ERROR] Bot-Start fehlgeschlagen ({type(exc).__name__}): {exc}")
             traceback.print_exc()
@@ -119,6 +121,11 @@ async def main():
 
     try:
         await web.stop()
+    except Exception:
+        pass
+
+    try:
+        await db.close()
     except Exception:
         pass
 

@@ -130,6 +130,15 @@ class Database:
                 pass
         await self._conn.commit()
 
+    async def close(self):
+        if not self._conn:
+            return
+        try:
+            await self._conn.close()
+        except Exception:
+            pass
+        self._conn = None
+
     def _normalize_sql(self, sql: str) -> str:
         if self._driver != "mysql":
             return sql
