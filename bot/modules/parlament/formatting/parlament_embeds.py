@@ -26,6 +26,16 @@ def _color(settings, guild: discord.Guild | None) -> int:
     return parse_hex_color(value)
 
 
+def _add_banner(container: discord.ui.Container, banner: str):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=banner)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
 def _status_emoji(status: discord.Status | str | None) -> str:
     if status == "online" or status == discord.Status.online:
         return "🟢"
@@ -58,7 +68,7 @@ def _member_line(member: discord.Member, stats: tuple[int, int] | None) -> str:
     return f"{emoji} {member.mention} — {_stats_line(stats)}"
 
 
-def build_parliament_panel_embed(
+def build_parliament_panel_container(
     settings,
     guild: discord.Guild | None,
     candidates: list[discord.Member],
@@ -113,32 +123,44 @@ def build_parliament_panel_embed(
         f"{info} Live-Status"
     )
 
-    emb = discord.Embed(
-        title=f"{palace} 𑁉 PARLAMENT – STATUS",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    emb.set_image(url=Banners.PARLIAMENT)
-    emb.add_field(
-        name="Feste Mitglieder (Leitung)",
-        value=leaders_block,
-        inline=False,
-    )
-    emb.add_field(
-        name=f"Kandidaten ({len(candidates)})",
-        value=cand_block,
-        inline=False,
-    )
-    emb.add_field(
-        name=f"Mitglieder ({len(members)})",
-        value=mem_block,
-        inline=False,
-    )
-    if guild and guild.icon:
-        emb.set_thumbnail(url=guild.icon.url)
+    header = f"**{palace} 𑁉 PARLAMENT – STATUS**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.PARLIAMENT)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(f"**Feste Mitglieder (Leitung)**\n{leaders_block}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(f"**Kandidaten ({len(candidates)})**\n{cand_block}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(f"**Mitglieder ({len(members)})**\n{mem_block}"))
     if updated_at:
-        emb.set_footer(text=f"Aktualisiert: {format_dt(updated_at, style='t')}")
-    return emb
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(f"Aktualisiert: {format_dt(updated_at, style='t')}"))
+    return container
+
+
+def build_parliament_panel_embed(
+    settings,
+    guild: discord.Guild | None,
+    candidates: list[discord.Member],
+    members: list[discord.Member],
+    stats_map: dict[int, tuple[int, int]],
+    fixed_members: list[discord.Member] | None = None,
+    updated_at: datetime | None = None,
+):
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(
+        build_parliament_panel_container(
+            settings,
+            guild,
+            candidates,
+            members,
+            stats_map,
+            fixed_members=fixed_members,
+            updated_at=updated_at,
+        )
+    )
+    return view
 
 
 def _bar(pct: int) -> str:
@@ -147,7 +169,7 @@ def _bar(pct: int) -> str:
     return f"`{full}{empty}` {pct}%"
 
 
-def build_parliament_vote_embed(
+def build_parliament_vote_container(
     settings,
     guild: discord.Guild | None,
     candidates: list[discord.Member],
@@ -170,12 +192,33 @@ def build_parliament_vote_embed(
         + "\n\n".join(lines)
     )
 
-    emb = discord.Embed(
-        title=f"{palace} 𑁉 PARLAMENT – VOTUM • {status_label}",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    emb.set_image(url=Banners.ELECTION)
+    header = f"**{palace} 𑁉 PARLAMENT – VOTUM • {status_label}**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.ELECTION)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
     if created_at:
-        emb.set_footer(text=f"Start: {format_dt(created_at, style='f')}")
-    return emb
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(f"Start: {format_dt(created_at, style='f')}"))
+    return container
+
+
+def build_parliament_vote_embed(
+    settings,
+    guild: discord.Guild | None,
+    candidates: list[discord.Member],
+    counts: dict[int, int],
+    status_label: str,
+    created_at: datetime | None = None,
+):
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(
+        build_parliament_vote_container(
+            settings,
+            guild,
+            candidates,
+            counts,
+            status_label,
+            created_at=created_at,
+        )
+    )
+    return view

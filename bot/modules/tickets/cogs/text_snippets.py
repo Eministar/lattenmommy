@@ -75,8 +75,8 @@ class TextSnippetsCommands(commands.Cog):
             title = str(v.get("title", k)).strip()
             items.append((str(k), title))
 
-        emb = build_snippet_list_embed(self.bot.settings, interaction.guild, items)
-        await interaction.response.send_message(embed=emb, ephemeral=True)
+        view = build_snippet_list_embed(self.bot.settings, interaction.guild, items)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
     @snippets.command(name="send", description="✉️ 𑁉 Snippet im Ticket senden")
     @app_commands.describe(key="Key des Snippets")
@@ -110,10 +110,10 @@ class TextSnippetsCommands(commands.Cog):
 
         title = str(found[1].get("title", found[0])).strip()
         body = str(found[1].get("body", "")).strip()
-        emb = build_snippet_embed(self.bot.settings, interaction.guild, found[0], title, body)
+        view = build_snippet_embed(self.bot.settings, interaction.guild, found[0], title, body)
 
         try:
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -121,7 +121,7 @@ class TextSnippetsCommands(commands.Cog):
         for uid in recipients:
             try:
                 user = await self.bot.fetch_user(int(uid))
-                await user.send(embed=emb)
+                await user.send(view=view)
             except Exception:
                 pass
 

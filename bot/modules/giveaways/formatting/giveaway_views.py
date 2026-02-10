@@ -22,6 +22,45 @@ def _color(settings, guild: discord.Guild | None) -> int:
         return DEFAULT_COLOR
 
 
+def build_confirm_container(
+    settings,
+    guild: discord.Guild | None,
+    data: dict,
+    conditions_text: str,
+    join_emoji: str,
+):
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    info = em(settings, "info", guild) or "ℹ️"
+
+    title = str(data.get("title") or "—").strip()
+    sponsor = str(data.get("sponsor") or "—").strip()
+    winners = int(data.get("winner_count") or 1)
+    duration = str(data.get("duration_minutes") or "—").strip()
+    conditions_text = str(conditions_text or "—").strip()
+
+    header = f"**{info} 𑁉 GIVEAWAY ERSTELLT**"
+    desc = (
+        f"{arrow2} Giveaway wurde erstellt.\n\n"
+        f"┏`🎁` - Preis: **{title}**\n"
+        f"┣`🤝` - Sponsor: **{sponsor}**\n"
+        f"┣`🏆` - Gewinner: **{winners}**\n"
+        f"┣`⏱️` - Dauer: **{duration} Min**\n"
+        f"┣`✅` - Bedingungen:\n{conditions_text}\n"
+        f"┗`📣` - Teilnahme: Reagiere mit {join_emoji}"
+    )
+
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.GIVEAWAY)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return container
+
+
 def build_giveaway_container(
     settings,
     guild: discord.Guild | None,

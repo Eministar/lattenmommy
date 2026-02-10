@@ -30,8 +30,19 @@ class ParliamentVoteSelect(discord.ui.Select):
 
 
 class ParliamentVoteView(discord.ui.LayoutView):
-    def __init__(self, service, vote_id: int, candidate_options: list[tuple[int, str]], custom_id: str | None = None):
+    def __init__(
+        self,
+        service,
+        vote_id: int,
+        candidate_options: list[tuple[int, str]],
+        custom_id: str | None = None,
+        container: discord.ui.Container | None = None,
+        include_select: bool = True,
+    ):
         super().__init__(timeout=None)
-        row = discord.ui.ActionRow()
-        row.add_item(ParliamentVoteSelect(service, vote_id, candidate_options, custom_id=custom_id))
-        self.add_item(row)
+        if container:
+            self.add_item(container)
+        if include_select:
+            row = discord.ui.ActionRow()
+            row.add_item(ParliamentVoteSelect(service, vote_id, candidate_options, custom_id=custom_id))
+            self.add_item(row)

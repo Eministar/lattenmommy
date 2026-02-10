@@ -6,18 +6,20 @@ import urllib.request
 import asyncio
 import discord
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 
 from bot.core.perms import is_staff
 from bot.modules.tickets.views.summary_view import SummaryView
 from bot.modules.tickets.views.rating_view import RatingView
 from bot.modules.tickets.formatting.ticket_embeds import (
-    build_summary_embed,
+    build_summary_container,
     build_user_message_embed,
     build_dm_ticket_created_embed,
     build_dm_message_appended_embed,
     build_dm_staff_reply_embed,
     build_dm_ticket_closed_embed,
+    build_dm_ticket_closed_container,
     build_dm_rating_thanks_embed,
     build_dm_ticket_added_embed,
     build_thread_status_embed,
@@ -77,6 +79,31 @@ def _split_attachments(attachments, limit: int = 8) -> tuple[list[str], list[str
         else:
             others.append(url)
     return images, others
+
+
+def _extract_component_text(components) -> str | None:
+    if not components:
+        return None
+
+    def _walk(comp) -> str | None:
+        content = getattr(comp, "content", None)
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        for child in getattr(comp, "children", []) or []:
+            text = _walk(child)
+            if text:
+                return text
+        for child in getattr(comp, "components", []) or []:
+            text = _walk(child)
+            if text:
+                return text
+        return None
+
+    for comp in components:
+        text = _walk(comp)
+        if text:
+            return text
+    return None
 
 def _clean_reply_snippet(text: str, limit: int = 140) -> str:
     if not text:
@@ -312,6 +339,8 @@ class TicketService:
                 content = emb.description
             if emb.author and emb.author.name:
                 author = emb.author.name
+        if not content:
+            content = _extract_component_text(getattr(ref_msg, "components", None))
         if not author and ref_msg.author:
             author = getattr(ref_msg.author, "display_name", None) or getattr(ref_msg.author, "name", None)
         if not content and ref_msg.attachments:
@@ -335,14 +364,16 @@ class TicketService:
         return f"↪ Antwort auf: {snippet}"
 
     def _build_image_embed(self, guild: discord.Guild | None, author: discord.User | discord.Member | None, url: str):
-        emb = discord.Embed(color=parse_int_color(self.settings, guild.id if guild else None))
-        emb.set_image(url=url)
-        if author:
-            try:
-                emb.set_author(name=author.display_name, icon_url=author.display_avatar.url)
-            except Exception:
-                pass
-        return emb
+        container = discord.ui.Container(accent_colour=parse_int_color(self.settings, guild.id if guild else None))
+        try:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=url)
+            container.add_item(gallery)
+        except Exception:
+            container.add_item(discord.ui.TextDisplay(url))
+        view = discord.ui.LayoutView(timeout=None)
+        view.add_item(container)
+        return view
 
     async def _get_ticket_log_channel(self, guild: discord.Guild | None):
         log_id = self._gi(guild.id, "ticket.log_channel_id") if guild else 0
@@ -362,7 +393,7 @@ class TicketService:
         ch = await self._get_ticket_log_channel(guild)
         if not ch:
             return
-        emb = build_ticket_log_embed(
+        view = build_ticket_log_embed(
             self.settings,
             guild,
             title,
@@ -372,7 +403,7 @@ class TicketService:
             actor=actor,
         )
         try:
-            await ch.send(embed=emb)
+            await ch.send(view=view)
         except Exception:
             pass
 
@@ -388,11 +419,10 @@ class TicketService:
                 user = await self.bot.fetch_user(int(uid))
             except Exception as e:
                 return False, f"{type(e).__name__}: {e}"
-            emb = build_dm_ticket_update_embed(self.settings, guild, title, text)
-            if "geschlossen" in str(title or "").lower():
-                emb.set_image(url=Banners.TICKETS_CLOSED)
+            banner_url = Banners.TICKETS_CLOSED if "geschlossen" in str(title or "").lower() else None
+            view = build_dm_ticket_update_embed(self.settings, guild, title, text, banner_url=banner_url)
             try:
-                await user.send(embed=emb)
+                await user.send(view=view)
                 return True, None
             except Exception as e:
                 return False, f"{type(e).__name__}: {e}"
@@ -416,9 +446,9 @@ class TicketService:
             user = await self.bot.fetch_user(int(uid))
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
-        emb = build_dm_ticket_forwarded_embed(self.settings, guild, role_name, reason)
+        view = build_dm_ticket_forwarded_embed(self.settings, guild, role_name, reason)
         try:
-            await user.send(embed=emb)
+            await user.send(view=view)
             return True, None
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
@@ -479,9 +509,68 @@ class TicketService:
             return
         try:
             msg = await thread.fetch_message(int(summary_message_id))
-            await msg.edit(view=SummaryView(self, ticket_id=int(ticket_id), claimed=bool(claimed), status=str(status or "open")))
+            row = await self.db.get_ticket(int(ticket_id))
+            t = _normalize_ticket_row(thread.guild.id, row)
+            if not t:
+                return
+            container = await self._build_summary_container_for_ticket(thread.guild, t)
+            if not container:
+                return
+            await msg.edit(
+                view=SummaryView(
+                    self,
+                    ticket_id=int(ticket_id),
+                    claimed=bool(claimed),
+                    status=str(status or "open"),
+                    container=container,
+                )
+            )
         except Exception:
             pass
+
+    async def _build_summary_container_for_ticket(self, guild: discord.Guild, t: dict):
+        if not guild or not t:
+            return None
+        user_id = int(t.get("user_id") or 0)
+        if not user_id:
+            return None
+
+        member = guild.get_member(user_id)
+        user = member
+        if not user:
+            try:
+                user = await self.bot.fetch_user(int(user_id))
+            except Exception:
+                user = None
+        if not user:
+            user = SimpleNamespace(
+                id=int(user_id),
+                mention=f"<@{int(user_id)}>",
+                created_at=datetime.now(timezone.utc),
+            )
+
+        category_key = str(t.get("category_key") or self._g(guild.id, "ticket.default_category", "allgemeine_frage"))
+        cat_cfg = (self._g(guild.id, "categories", {}) or {}).get(category_key, {}) or {}
+        cat_label = str(cat_cfg.get("label", category_key)).upper()
+
+        created_at = _parse_iso(str(t.get("created_at") or "")) or datetime.now(timezone.utc)
+        try:
+            total = int(await self.db.get_ticket_count(int(user_id)))
+        except Exception:
+            total = 0
+
+        return build_summary_container(
+            self.settings,
+            guild,
+            user,
+            member,
+            _truncate(cat_label, 48),
+            created_at=created_at,
+            total_tickets=total,
+            priority=t.get("priority"),
+            status_label=t.get("status_label") or "🟢 OFFEN",
+            escalated_level=t.get("escalated_level") or 0,
+        )
 
     async def _notify_user_claim_state(self, guild: discord.Guild, thread: discord.Thread, t: dict,
                                        staff: discord.Member, claimed: bool):
@@ -497,8 +586,6 @@ class TicketService:
             return False, f"{type(e).__name__}: {e}"
 
         color = parse_int_color(self.settings, guild.id)
-        ft = self._g(guild.id, "design.footer_text", None)
-
         arrow2 = em(self.settings, "arrow2", guild) or "➜"
 
         if claimed:
@@ -516,19 +603,21 @@ class TicketService:
                 "┗`📩` - Du kannst hier weiter per DM antworten."
             )
 
-        emb = discord.Embed(title=title, description=desc, color=color)
-        emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
+        container = discord.ui.Container(accent_colour=color)
         if claimed:
-            emb.set_image(url=Banners.TICKETS_CLAIM)
-        if ft:
-            bot_member = getattr(guild, "me", None)
-            if bot_member:
-                emb.set_footer(text=bot_member.display_name, icon_url=bot_member.display_avatar.url)
-            else:
-                emb.set_footer(text=str(ft))
+            try:
+                gallery = discord.ui.MediaGallery()
+                gallery.add_item(media=Banners.TICKETS_CLAIM)
+                container.add_item(gallery)
+                container.add_item(discord.ui.Separator())
+            except Exception:
+                pass
+        container.add_item(discord.ui.TextDisplay(f"**{title}**\n{desc}"))
+        view = discord.ui.LayoutView(timeout=None)
+        view.add_item(container)
 
         try:
-            await user.send(embed=emb)
+            await user.send(view=view)
             return True, None
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
@@ -597,7 +686,9 @@ class TicketService:
                 except Exception:
                     pass
                 try:
-                    await message.author.send(embed=build_dm_message_appended_embed(self.settings, guild, int(existing["ticket_id"])))
+                    await message.author.send(
+                        view=build_dm_message_appended_embed(self.settings, guild, int(existing["ticket_id"]))
+                    )
                 except Exception:
                     pass
 
@@ -651,7 +742,7 @@ class TicketService:
 
         content_head = f"User-ID: {user.id}\n{role_mention}".strip()
 
-        summary_embed = build_summary_embed(
+        summary_container = build_summary_container(
             self.settings,
             guild,
             user,
@@ -664,14 +755,13 @@ class TicketService:
             escalated_level=0,
         )
 
-        view = SummaryView(self, ticket_id=0, status="open")
+        view = SummaryView(self, ticket_id=0, status="open", container=summary_container)
 
         thread_name = f"{prefix} {user.display_name}"
         try:
             created = await forum.create_thread(
                 name=_truncate(thread_name, 100),
                 content=content_head,
-                embeds=[summary_embed],
                 view=view,
                 applied_tags=applied_tags,
             )
@@ -713,7 +803,7 @@ class TicketService:
             pass
 
         try:
-            await user.send(embed=build_dm_ticket_created_embed(self.settings, guild, int(ticket_id), created_at))
+            await user.send(view=build_dm_ticket_created_embed(self.settings, guild, int(ticket_id), created_at))
         except Exception:
             pass
 
@@ -736,12 +826,12 @@ class TicketService:
             text = f"{reply_line}\n\n{text}".strip()
 
         text = _truncate(text, 3500) if text else " "
-        emb = build_user_message_embed(self.settings, guild, user, text)
-        await thread.send(embed=emb)
+        view = build_user_message_embed(self.settings, guild, user, text)
+        await thread.send(view=view)
 
         for url in images:
             try:
-                await thread.send(embed=self._build_image_embed(guild, user, url))
+                await thread.send(view=self._build_image_embed(guild, user, url))
             except Exception:
                 pass
 
@@ -797,14 +887,14 @@ class TicketService:
 
         dm_ok = False
         dm_error = None
-        emb = build_dm_staff_reply_embed(self.settings, message.guild, message.author, int(t["ticket_id"]), text, reply_line=reply_line)
+        view = build_dm_staff_reply_embed(self.settings, message.guild, message.author, int(t["ticket_id"]), text, reply_line=reply_line)
         for pid in participant_ids:
             try:
                 user = await self.bot.fetch_user(int(pid))
-                await user.send(embed=emb)
+                await user.send(view=view)
                 for url in images:
                     try:
-                        await user.send(embed=self._build_image_embed(message.guild, message.author, url))
+                        await user.send(view=self._build_image_embed(message.guild, message.author, url))
                     except Exception:
                         pass
                 dm_ok = True
@@ -866,14 +956,14 @@ class TicketService:
             await self._touch_ticket(int(ticket_id))
 
             try:
-                emb = build_thread_status_embed(
+                view = build_thread_status_embed(
                     self.settings,
                     interaction.guild,
                     "🔓 Ticket freigegeben",
                     f"{interaction.user.mention} kümmert sich nicht mehr um dieses Ticket.",
                     interaction.user
                 )
-                await thread.send(embed=emb)
+                await thread.send(view=view)
             except Exception:
                 pass
 
@@ -896,7 +986,7 @@ class TicketService:
         try:
             arrow2 = em(self.settings, "arrow2", interaction.guild) or "➜"
 
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "✅ 𑁉 TICKET ÜBERNOMMEN",
@@ -909,7 +999,7 @@ class TicketService:
                 banner_url=Banners.TICKETS_CLAIM,
             )
 
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -949,8 +1039,8 @@ class TicketService:
         note_text = _truncate((text or "").strip(), 3500) if text else " "
 
         try:
-            emb = build_thread_status_embed(self.settings, interaction.guild, "📝 TEAM-NOTIZ", note_text, interaction.user)
-            await thread.send(embed=emb)
+            view = build_thread_status_embed(self.settings, interaction.guild, "📝 TEAM-NOTIZ", note_text, interaction.user)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -992,7 +1082,7 @@ class TicketService:
         try:
             arrow2 = em(self.settings, "arrow2", interaction.guild) or "➜"
 
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "➕ 𑁉 USER HINZUGEFÜGT",
@@ -1004,13 +1094,13 @@ class TicketService:
                 interaction.user,
             )
 
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
         try:
-            dm_emb = build_dm_ticket_added_embed(self.settings, interaction.guild, int(t["ticket_id"]), interaction.user)
-            await user.send(embed=dm_emb)
+            dm_view = build_dm_ticket_added_embed(self.settings, interaction.guild, int(t["ticket_id"]), interaction.user)
+            await user.send(view=dm_view)
         except Exception:
             pass
 
@@ -1039,20 +1129,20 @@ class TicketService:
             pass
 
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 guild,
                 "➕ User hinzugefügt",
                 f"{user.mention} wurde zum Ticket hinzugefügt und erhält künftig Antworten per DM.",
                 actor,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
         try:
-            dm_emb = build_dm_ticket_added_embed(self.settings, guild, int(t["ticket_id"]), actor)
-            await user.send(embed=dm_emb)
+            dm_view = build_dm_ticket_added_embed(self.settings, guild, int(t["ticket_id"]), actor)
+            await user.send(view=dm_view)
         except Exception:
             pass
 
@@ -1088,7 +1178,7 @@ class TicketService:
             body = f"{actor.mention} kümmert sich nicht mehr um dieses Ticket."
 
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 guild,
                 title,
@@ -1096,7 +1186,7 @@ class TicketService:
                 actor,
                 banner_url=Banners.TICKETS_CLAIM if claimed else None,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1142,11 +1232,17 @@ class TicketService:
         if uid:
             try:
                 user = await self.bot.fetch_user(int(uid))
-                dm_emb = build_dm_ticket_closed_embed(self.settings, guild, int(t["ticket_id"]), closed_at, rating_enabled)
                 if rating_enabled:
-                    await user.send(embed=dm_emb, view=RatingView(self, int(t["ticket_id"])))
+                    container = build_dm_ticket_closed_container(
+                        self.settings, guild, int(t["ticket_id"]), closed_at, rating_enabled
+                    )
+                    await user.send(view=RatingView(self, int(t["ticket_id"]), container=container))
                 else:
-                    await user.send(embed=dm_emb)
+                    await user.send(
+                        view=build_dm_ticket_closed_embed(
+                            self.settings, guild, int(t["ticket_id"]), closed_at, rating_enabled
+                        )
+                    )
                 dm_ok = True
                 transcript_ok, transcript_error, transcript_url = await self._send_transcript_dm(user, thread, t)
                 transcript_ok, transcript_error, transcript_url = await self._send_transcript_dm(user, thread, t)
@@ -1169,7 +1265,7 @@ class TicketService:
         elif transcript_error:
             status_text += "\n\n⚠️ Transcript konnte nicht per DM gesendet werden."
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 guild,
                 "🔒 Ticket geschlossen",
@@ -1177,7 +1273,7 @@ class TicketService:
                 actor,
                 banner_url=Banners.TICKETS_CLOSED,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1260,11 +1356,17 @@ class TicketService:
         if uid:
             try:
                 user = await self.bot.fetch_user(int(uid))
-                dm_emb = build_dm_ticket_closed_embed(self.settings, interaction.guild, int(t["ticket_id"]), closed_at, rating_enabled)
                 if rating_enabled:
-                    await user.send(embed=dm_emb, view=RatingView(self, int(t["ticket_id"])))
+                    container = build_dm_ticket_closed_container(
+                        self.settings, interaction.guild, int(t["ticket_id"]), closed_at, rating_enabled
+                    )
+                    await user.send(view=RatingView(self, int(t["ticket_id"]), container=container))
                 else:
-                    await user.send(embed=dm_emb)
+                    await user.send(
+                        view=build_dm_ticket_closed_embed(
+                            self.settings, interaction.guild, int(t["ticket_id"]), closed_at, rating_enabled
+                        )
+                    )
                 dm_ok = True
             except Exception as e:
                 dm_ok = False
@@ -1277,7 +1379,7 @@ class TicketService:
         if not dm_ok:
             status_text += "\n\n⚠️ User konnte nicht per DM erreicht werden."
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "🔒 Ticket geschlossen",
@@ -1285,7 +1387,7 @@ class TicketService:
                 interaction.user,
                 banner_url=Banners.TICKETS_CLOSED,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1343,14 +1445,14 @@ class TicketService:
             f"┗`📝` - Grund: {reason_text or '—'}"
         )
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "📨 Ticket weitergeleitet",
                 body,
                 interaction.user,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
             await thread.send(role.mention)
         except Exception:
             pass
@@ -1402,14 +1504,14 @@ class TicketService:
             pass
 
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "🔓 Ticket wieder geöffnet",
                 f"{interaction.user.mention} hat das Ticket wieder geöffnet.",
                 interaction.user,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1456,14 +1558,14 @@ class TicketService:
         await self._touch_ticket(int(t["ticket_id"]))
 
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "🏷️ Status geändert",
                 f"Neuer Status: **{label}**",
                 interaction.user,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1510,14 +1612,14 @@ class TicketService:
 
         label = self._priority_label(priority)
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "🚦 Priorität geändert",
                 f"Neue Priorität: **{label}**",
                 interaction.user,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1568,14 +1670,14 @@ class TicketService:
             body += f"\n\n{note}"
 
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "⚠️ Ticket eskaliert",
                 body,
                 interaction.user,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1654,14 +1756,14 @@ class TicketService:
         await self._touch_ticket(int(t["ticket_id"]))
 
         try:
-            emb = build_thread_status_embed(
+            view = build_thread_status_embed(
                 self.settings,
                 interaction.guild,
                 "🏷️ Kategorie geändert",
                 f"Neue Kategorie: **{_truncate(cat_label, 48)}**",
                 interaction.user,
             )
-            await thread.send(embed=emb)
+            await thread.send(view=view)
         except Exception:
             pass
 
@@ -1957,7 +2059,7 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
                 created_at = _parse_iso(t.get("created_at"))
                 if created_at and now - created_at >= timedelta(minutes=sla_minutes):
                     try:
-                        emb = build_thread_status_embed(
+                        view = build_thread_status_embed(
                             self.settings,
                             guild,
                             "⏱️ SLA überschritten",
@@ -1965,7 +2067,7 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
                             None,
                         )
                         if thread:
-                            await thread.send(embed=emb)
+                            await thread.send(view=view)
                     except Exception:
                         pass
                     try:
@@ -1991,7 +2093,7 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
 
                     try:
                         if thread:
-                            emb = build_thread_status_embed(
+                            view = build_thread_status_embed(
                                 self.settings,
                                 guild,
                                 "🔒 Auto-Close",
@@ -1999,7 +2101,7 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
                                 None,
                                 banner_url=Banners.TICKETS_CLOSED,
                             )
-                            await thread.send(embed=emb)
+                            await thread.send(view=view)
                             await thread.edit(archived=True, locked=True)
                     except Exception:
                         pass
@@ -2064,12 +2166,12 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
 
         try:
             await interaction.response.send_message(
-                embed=build_dm_rating_thanks_embed(self.settings, guild, int(rating)),
+                view=build_dm_rating_thanks_embed(self.settings, guild, int(rating)),
                 ephemeral=False
             )
         except discord.InteractionResponded:
             await interaction.followup.send(
-                embed=build_dm_rating_thanks_embed(self.settings, guild, int(rating)),
+                view=build_dm_rating_thanks_embed(self.settings, guild, int(rating)),
                 ephemeral=False
             )
 
@@ -2085,9 +2187,9 @@ body {{ font-family: "gg sans","Noto Sans","Helvetica Neue",Arial,sans-serif; ba
             if guild and t and t.get("thread_id"):
                 thread = guild.get_thread(int(t["thread_id"]))
                 if thread:
-                    emb = build_thread_rating_embed(self.settings, guild, int(interaction.user.id), int(rating),
-                                                    comment)
-                    await thread.send(embed=emb)
+                    view = build_thread_rating_embed(self.settings, guild, int(interaction.user.id), int(rating),
+                                                     comment)
+                    await thread.send(view=view)
         except Exception:
             pass
 

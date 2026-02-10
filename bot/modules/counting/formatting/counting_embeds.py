@@ -37,8 +37,23 @@ def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
             emb.set_footer(text=str(ft))
 
 
-def _apply_banner(emb: discord.Embed):
-    emb.set_image(url=Banners.COUNTING)
+def _add_banner(container: discord.ui.Container):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.COUNTING)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
+def _build_view(settings, guild: discord.Guild | None, header: str, body: str) -> discord.ui.LayoutView:
+    view = discord.ui.LayoutView(timeout=None)
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{body}"))
+    view.add_item(container)
+    return view
 
 
 def build_counting_fail_embed(
@@ -65,14 +80,8 @@ def build_counting_fail_embed(
         f"┗`💥` - Reset-Count: **{total_fails}**"
     )
 
-    emb = discord.Embed(
-        title=f"{red} 𑁉 COUNTING FAIL",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _apply_banner(emb)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{red} 𑁉 COUNTING FAIL**"
+    return _build_view(settings, guild, header, desc)
 
 
 def build_counting_milestone_embed(
@@ -94,14 +103,8 @@ def build_counting_milestone_embed(
         f"┗`⚠️` - Gesamt Fails: **{total_fails}**"
     )
 
-    emb = discord.Embed(
-        title=f"{info} 𑁉 MEILENSTEIN",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _apply_banner(emb)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} 𑁉 MEILENSTEIN**"
+    return _build_view(settings, guild, header, desc)
 
 
 def build_counting_record_embed(
@@ -119,11 +122,5 @@ def build_counting_record_embed(
         f"┗`🏆` - Highscore: **{highscore}**"
     )
 
-    emb = discord.Embed(
-        title=f"{green} 𑁉 NEUER REKORD",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _apply_banner(emb)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{green} 𑁉 NEUER REKORD**"
+    return _build_view(settings, guild, header, desc)

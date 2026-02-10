@@ -156,8 +156,8 @@ class GiveawayCreateButton(discord.ui.Button):
             return await interaction.response.send_message("Zielkanal ungültig.", ephemeral=True)
         await self.service.create_giveaway(interaction.guild, channel, data, conditions)
         self.service._pending.pop(self.user_id, None)
-        emb = await self.service.build_confirm_embed(interaction.guild, data, conditions)
-        await interaction.response.send_message(embed=emb, ephemeral=True)
+        view = await self.service.build_confirm_embed(interaction.guild, data, conditions)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
 
 class GiveawayAdvancedModal(discord.ui.Modal):

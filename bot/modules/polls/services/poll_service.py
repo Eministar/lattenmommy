@@ -33,35 +33,7 @@ class PollService:
         return poll_id
 
     async def build_poll_embed(self, guild: discord.Guild, poll_id: int):
-        row = await self.db.get_poll(poll_id)
-        if not row:
-            return None
-        _, _, _, _, question, options_json, _, status, created_at = row
-        options = json.loads(options_json)
-        votes = await self.db.list_poll_votes(poll_id)
-        total = max(1, len(votes))
-        counts = [0 for _ in options]
-        for idx in votes:
-            if 0 <= idx < len(counts):
-                counts[idx] += 1
-
-        arrow2 = em(self.settings, "arrow2", guild) or "»"
-        info = em(self.settings, "info", guild) or "ℹ️"
-        status_label = "OFFEN" if status == "open" else "GESCHLOSSEN"
-        lines = []
-        for i, opt in enumerate(options):
-            pct = int((counts[i] / total) * 100) if total else 0
-            lines.append(f"**{i+1}. {opt}**\n{self._bar(pct)} • {counts[i]} Stimme(n)")
-        desc = f"{arrow2} {question}\n\n" + "\n\n".join(lines)
-
-        emb = discord.Embed(
-            title=f"{info} 𑁉 UMFRAGE • {status_label}",
-            description=desc,
-            color=self._color(guild),
-        )
-        emb.set_image(url=Banners.POLL)
-        emb.set_footer(text=f"ID {poll_id} • {created_at}")
-        return emb
+        return await self.build_poll_view(guild, poll_id)
 
     async def build_poll_view(self, guild: discord.Guild, poll_id: int, options: list[str] | None = None):
         row = await self.db.get_poll(poll_id)

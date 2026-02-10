@@ -7,7 +7,7 @@ import discord
 from bot.core.perms import is_staff
 from bot.modules.parlament.formatting.parlament_embeds import (
     build_parliament_panel_embed,
-    build_parliament_vote_embed,
+    build_parliament_vote_container,
 )
 from bot.modules.parlament.views.vote_view import ParliamentVoteView
 
@@ -152,7 +152,7 @@ class ParliamentService:
         rows = await self.db.list_parliament_stats(guild.id, user_ids)
         stats_map = {int(r[1]): (int(r[2]), int(r[3])) for r in rows or []}
 
-        emb = build_parliament_panel_embed(
+        view = build_parliament_panel_embed(
             self.settings,
             guild,
             candidates,
@@ -171,13 +171,13 @@ class ParliamentService:
                 msg = None
         if msg:
             try:
-                await msg.edit(embed=emb)
+                await msg.edit(view=view)
                 return
             except Exception:
                 pass
 
         try:
-            msg = await channel.send(embed=emb)
+            msg = await channel.send(view=view)
             await self.settings.set_guild_override(self.db, guild.id, "parlament.panel_message_id", int(msg.id))
         except Exception:
             pass
@@ -238,7 +238,7 @@ class ParliamentService:
 
         created_at = datetime.now(timezone.utc)
         counts = {}
-        emb = build_parliament_vote_embed(
+        container = build_parliament_vote_container(
             self.settings,
             interaction.guild,
             candidates,
@@ -246,9 +246,15 @@ class ParliamentService:
             "OFFEN",
             created_at=created_at,
         )
-        view = ParliamentVoteView(self, vote_id, self._candidate_options(interaction.guild, candidate_ids))
+        view = ParliamentVoteView(
+            self,
+            vote_id,
+            self._candidate_options(interaction.guild, candidate_ids),
+            container=container,
+            include_select=True,
+        )
 
-        msg = await channel.send(embed=emb, view=view)
+        msg = await channel.send(view=view)
         await self.db.set_parliament_vote_message(vote_id, int(msg.id))
 
         await interaction.response.send_message("Votum gestartet.", ephemeral=True)
@@ -322,7 +328,7 @@ class ParliamentService:
             created_at = datetime.fromisoformat(str(created_at_raw))
         except Exception:
             created_at = None
-        closed_embed = build_parliament_vote_embed(
+        container = build_parliament_vote_container(
             self.settings,
             interaction.guild,
             candidates,
@@ -330,6 +336,8 @@ class ParliamentService:
             "GESCHLOSSEN",
             created_at=created_at,
         )
+        closed_view = discord.ui.LayoutView(timeout=None)
+        closed_view.add_item(container)
 
         try:
             channel = await self._get_channel(interaction.guild, channel_id)
@@ -339,7 +347,7 @@ class ParliamentService:
         if channel and message_id:
             try:
                 msg = await channel.fetch_message(int(message_id))
-                await msg.edit(embed=closed_embed, view=None)
+                await msg.edit(view=closed_view)
             except Exception:
                 pass
 
@@ -386,13 +394,16 @@ class ParliamentService:
         try:
             view = await self.build_vote_view(interaction.guild, vote_id)
             if view:
-                await interaction.message.edit(view=view, embed=await self.build_vote_embed(interaction.guild, vote_id))
+                await interaction.message.edit(view=view)
         except Exception:
             pass
 
         await interaction.response.send_message("Stimme gespeichert.", ephemeral=True)
 
     async def build_vote_embed(self, guild: discord.Guild, vote_id: int):
+        return await self.build_vote_view(guild, vote_id, include_select=False)
+
+    async def build_vote_view(self, guild: discord.Guild, vote_id: int, include_select: bool = True):
         row = await self.db.get_parliament_vote(vote_id)
         if not row:
             return None
@@ -403,7 +414,7 @@ class ParliamentService:
             candidate_ids = json.loads(candidate_ids_json)
         except Exception:
             candidate_ids = []
-        candidates = [guild.get_member(int(cid)) for cid in candidate_ids]
+        candidates = [guild.get_member(int(cid)) for cid in candidate_ids] if guild else []
         candidates = [m for m in candidates if m]
         counts = await self.db.count_parliament_vote_entries(vote_id)
         status_label = "OFFEN" if status == "open" else "GESCHLOSSEN"
@@ -411,7 +422,7 @@ class ParliamentService:
             created_at = datetime.fromisoformat(str(created_at_raw))
         except Exception:
             created_at = None
-        return build_parliament_vote_embed(
+        container = build_parliament_vote_container(
             self.settings,
             guild,
             candidates,
@@ -419,17 +430,12 @@ class ParliamentService:
             status_label,
             created_at=created_at,
         )
-
-    async def build_vote_view(self, guild: discord.Guild, vote_id: int):
-        row = await self.db.get_parliament_vote(vote_id)
-        if not row:
-            return None
-        candidate_ids_json = str(row[4] or "[]")
-        try:
-            candidate_ids = json.loads(candidate_ids_json)
-        except Exception:
-            candidate_ids = []
-        return ParliamentVoteView(self, vote_id, self._candidate_options(guild, candidate_ids))
+        if guild:
+            options = self._candidate_options(guild, candidate_ids)
+        else:
+            options = [(int(cid), f"Kandidat {int(cid)}") for cid in candidate_ids]
+        allow_select = include_select and status == "open"
+        return ParliamentVoteView(self, vote_id, options, container=container, include_select=allow_select)
 
     async def restore_views(self):
         rows = await self.db.list_open_parliament_votes()

@@ -21,22 +21,20 @@ def _color(settings, guild: discord.Guild | None):
     return parse_hex_color(value)
 
 
-def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
-    if guild:
-        ft = settings.get_guild(guild.id, "design.footer_text", None)
-        bot_member = getattr(guild, "me", None)
-    else:
-        ft = settings.get("design.footer_text", None)
-        bot_member = None
-    if ft:
-        if bot_member:
-            emb.set_footer(text=bot_member.display_name, icon_url=bot_member.display_avatar.url)
-        else:
-            emb.set_footer(text=str(ft))
+def _add_banner(container: discord.ui.Container):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.TEMPVOICE)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
 
 
-def _apply_banner(emb: discord.Embed):
-    emb.set_image(url=Banners.TEMPVOICE)
+def _wrap(container: discord.ui.Container) -> discord.ui.LayoutView:
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(container)
+    return view
 
 
 def _region_label(region: str | None) -> str:
@@ -46,6 +44,17 @@ def _region_label(region: str | None) -> str:
 
 
 def build_tempvoice_panel_embed(
+    settings,
+    guild: discord.Guild | None,
+    owner: discord.Member,
+    channel: discord.VoiceChannel,
+    locked: bool,
+    private: bool,
+):
+    return _wrap(build_tempvoice_panel_container(settings, guild, owner, channel, locked, private))
+
+
+def build_tempvoice_panel_container(
     settings,
     guild: discord.Guild | None,
     owner: discord.Member,
@@ -72,18 +81,23 @@ def build_tempvoice_panel_embed(
         "Nutze die Buttons und Menues unten, um User zu verwalten oder den Channel zu "
         "anpassen."
     )
-    emb = discord.Embed(
-        title=f"{info} 𑁉 TEMP-VOICE PANEL",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _apply_banner(emb)
-    emb.set_thumbnail(url=owner.display_avatar.url)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} 𑁉 TEMP-VOICE PANEL**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return container
 
 
 def build_tempvoice_invite_embed(
+    settings,
+    guild: discord.Guild | None,
+    owner: discord.Member,
+    channel: discord.VoiceChannel,
+):
+    return _wrap(build_tempvoice_invite_container(settings, guild, owner, channel))
+
+
+def build_tempvoice_invite_container(
     settings,
     guild: discord.Guild | None,
     owner: discord.Member,
@@ -97,10 +111,7 @@ def build_tempvoice_invite_embed(
         f"┗`👤` - Owner: **{owner.display_name}**\n\n"
         "Du kannst jetzt joinen. Viel Spass!"
     )
-    emb = discord.Embed(
-        title=f"{love} 𑁉 VOICE-EINLADUNG",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{love} 𑁉 VOICE-EINLADUNG**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return container

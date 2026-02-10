@@ -46,12 +46,16 @@ class RatingCommentModal(discord.ui.Modal):
         await self.service.submit_rating(interaction, self.ticket_id, self.rating, text if text else None)
 
 
-class RatingView(discord.ui.View):
-    def __init__(self, service, ticket_id: int):
+class RatingView(discord.ui.LayoutView):
+    def __init__(self, service, ticket_id: int, container: discord.ui.Container | None = None):
         super().__init__(timeout=600)
         self.service = service
         self.ticket_id = int(ticket_id)
 
+        if container:
+            self.add_item(container)
+
+        row = discord.ui.ActionRow()
         for r in range(1, 6):
             btn = discord.ui.Button(
                 custom_id=f"starry:rating:{ticket_id}:{r}",
@@ -59,7 +63,8 @@ class RatingView(discord.ui.View):
                 label=("⭐" * r),
             )
             btn.callback = self._make_cb(r)
-            self.add_item(btn)
+            row.add_item(btn)
+        self.add_item(row)
 
     def _make_cb(self, rating: int):
         async def _cb(interaction: discord.Interaction):

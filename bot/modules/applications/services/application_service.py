@@ -115,10 +115,21 @@ class ApplicationService:
                     except Exception:
                         thread = None
             if thread:
-                view = build_application_followup_answer_embed(self.settings, guild, message.author, question, text)
-                header = f"Rückfrage von <@{staff_id}> an {message.author.mention}" if staff_id else None
+                if getattr(thread, "archived", False):
+                    try:
+                        await thread.edit(archived=False)
+                    except Exception:
+                        pass
+                view = build_application_followup_answer_embed(
+                    self.settings,
+                    guild,
+                    message.author,
+                    question,
+                    text,
+                    staff_id=staff_id,
+                )
                 try:
-                    await thread.send(content=header, view=view)
+                    await thread.send(view=view)
                 except Exception:
                     pass
             try:

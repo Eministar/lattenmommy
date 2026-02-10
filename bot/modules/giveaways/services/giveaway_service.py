@@ -4,8 +4,7 @@ import re
 from datetime import datetime, timezone, timedelta
 import discord
 from bot.utils.emojis import em
-from bot.utils.assets import Banners
-from bot.modules.giveaways.formatting.giveaway_views import build_giveaway_container
+from bot.modules.giveaways.formatting.giveaway_views import build_confirm_container, build_giveaway_container
 
 
 class GiveawayService:
@@ -162,59 +161,15 @@ class GiveawayService:
         return giveaway_id
 
     async def build_confirm_embed(self, guild: discord.Guild, data: dict, conditions: dict):
-        arrow2 = em(self.settings, "arrow2", guild) or "»"
-        info = em(self.settings, "info", guild) or "ℹ️"
-        desc = (
-            f"{arrow2} Giveaway wurde erstellt.\n\n"
-            f"┏`🎁` - Preis: **{data.get('title')}**\n"
-            f"┣`🤝` - Sponsor: **{data.get('sponsor') or '—'}**\n"
-            f"┣`🏆` - Gewinner: **{int(data.get('winner_count', 1))}**\n"
-            f"┣`⏱️` - Dauer: **{data.get('duration_minutes')} Min**\n"
-            f"┣`✅` - Bedingungen:\n{self._format_conditions(conditions, guild)}\n"
-            f"┗`📣` - Teilnahme: Reagiere mit {self._join_emoji(guild)}"
+        conditions_text = self._format_conditions(conditions, guild)
+        view = discord.ui.LayoutView(timeout=None)
+        view.add_item(
+            build_confirm_container(self.settings, guild, data, conditions_text, self._join_emoji(guild))
         )
-        emb = discord.Embed(
-            title=f"{info} 𑁉 GIVEAWAY ERSTELLT",
-            description=desc,
-            color=self._color(guild),
-        )
-        emb.set_image(url=Banners.GIVEAWAY)
-        return emb
-        return giveaway_id
+        return view
 
     async def build_giveaway_embed(self, guild: discord.Guild, giveaway_id: int):
-        row = await self.db.get_giveaway(giveaway_id)
-        if not row:
-            return None
-        _, _, _, _, title, sponsor, description, end_at, winners, conditions_json, created_by, status, _ = row
-        conditions = json.loads(conditions_json) if conditions_json else {}
-        arrow2 = em(self.settings, "arrow2", guild) or "»"
-        hearts = em(self.settings, "hearts", guild) or "💖"
-        info = em(self.settings, "info", guild) or "ℹ️"
-        cheers = em(self.settings, "cheers", guild) or "🎉"
-        entries = await self.db.count_giveaway_entries(giveaway_id)
-        end_dt = datetime.fromisoformat(str(end_at))
-        join_emoji = self._join_emoji(guild)
-
-        desc = (
-            f"{arrow2} **{description or 'Gewinne dieses Giveaway!'}**\n\n"
-            f"┏`🎁` - Preis: **{title}**\n"
-            f"┣`🤝` - Sponsor: **{sponsor or '—'}**\n"
-            f"┣`🏆` - Gewinner: **{int(winners)}**\n"
-            f"┣`⏰` - Ende: <t:{int(end_dt.timestamp())}:R>\n"
-            f"┣`✅` - Bedingungen:\n{self._format_conditions(conditions, guild)}\n"
-            f"┣`📌` - Teilnehmer: **{entries}**\n"
-            f"┗`🎯` - Teilnahme: Reagiere mit {join_emoji}"
-        )
-        state = "OFFEN" if status == "open" else "GESCHLOSSEN"
-        emb = discord.Embed(
-            title=f"{cheers} 𑁉 GIVEAWAY • {state}",
-            description=desc,
-            color=self._color(guild),
-        )
-        emb.set_image(url=Banners.GIVEAWAY)
-        emb.set_footer(text=f"ID {giveaway_id}")
-        return emb
+        return await self.build_giveaway_view(guild, giveaway_id)
 
     async def build_giveaway_view(self, guild: discord.Guild, giveaway_id: int):
         row = await self.db.get_giveaway(giveaway_id)

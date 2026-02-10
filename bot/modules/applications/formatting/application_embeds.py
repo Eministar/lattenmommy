@@ -242,11 +242,14 @@ def build_application_followup_answer_embed(
     user: discord.User,
     question: str,
     answer: str,
+    staff_id: int | None = None,
 ):
     arrow2 = em(settings, "arrow2", guild) or "»"
     pen = em(settings, "pen", guild) or "📝"
     header = f"**{pen} 𑁉 RÜCKFRAGE BEANTWORTET**"
     desc = f"{arrow2} Rückfrage beantwortet von {user.mention}."
+    if staff_id:
+        desc = f"{desc}\n{arrow2} Rückfrage gestellt von <@{int(staff_id)}>"
     q_text = _clip(str(question or "").strip(), 900) or "—"
     a_text = _clip(str(answer or "").strip(), 900) or "—"
     body = f"**FRAGE**\n{q_text}\n\n**ANTWORT**\n{a_text}"

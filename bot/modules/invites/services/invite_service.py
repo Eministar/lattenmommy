@@ -68,15 +68,20 @@ class InviteService:
             f"┣`🔗` - Invite: `{code_line}`\n"
             f"┗`⏰` - Zeitpunkt: {discord.utils.format_dt(now, style='f')}"
         )
-        emb = discord.Embed(
-            title=f"{info} 𑁉 INVITE – JOIN",
-            description=desc,
-            color=self._color(guild),
-        )
-        emb.set_image(url=Banners.INVITE)
-        emb.set_thumbnail(url=member.display_avatar.url)
+        header = f"**{info} 𑁉 INVITE – JOIN**"
+        view = discord.ui.LayoutView(timeout=None)
+        container = discord.ui.Container(accent_colour=self._color(guild))
         try:
-            await ch.send(embed=emb)
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=Banners.INVITE)
+            container.add_item(gallery)
+            container.add_item(discord.ui.Separator())
+        except Exception:
+            pass
+        container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+        view.add_item(container)
+        try:
+            await ch.send(view=view)
         except Exception:
             pass
 

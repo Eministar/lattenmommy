@@ -84,9 +84,13 @@ class SeelsorgeService:
 
         if forum:
             await self.settings.set_guild_override(self.db, guild.id, "seelsorge.forum_channel_id", int(forum.id))
+        await interaction.response.defer(ephemeral=True)
         await self._ensure_main_thread(guild, forum_channel)
         await self._refresh_user_threads(guild)
-        await interaction.response.send_message("Info + Panel aktualisiert.", ephemeral=True)
+        try:
+            await interaction.edit_original_response(content="Info + Panel aktualisiert.")
+        except Exception:
+            await interaction.followup.send("Info + Panel aktualisiert.", ephemeral=True)
 
     async def submit_entry(self, interaction: discord.Interaction, privacy_raw: str, content: str):
         if not interaction.guild or not interaction.user:

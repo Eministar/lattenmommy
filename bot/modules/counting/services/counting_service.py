@@ -721,7 +721,7 @@ class CountingService:
         self._schedule_channel_topic_update(message.guild, channel_id, state)
 
         if self._milestone_every(guild_id) > 0 and value % self._milestone_every(guild_id) == 0:
-            emb = build_counting_milestone_embed(
+            view = build_counting_milestone_embed(
                 self.settings,
                 message.guild,
                 milestone=value,
@@ -729,15 +729,15 @@ class CountingService:
                 total_counts=state.total_counts,
                 total_fails=state.total_fails,
             )
-            await message.channel.send(embed=emb)
+            await message.channel.send(view=view)
         elif (
             self._record_every(guild_id) > 0
             and value > prev_highscore
             and prev_highscore > 0
             and value % self._record_every(guild_id) == 0
         ):
-            emb = build_counting_record_embed(self.settings, message.guild, value, state.highscore)
-            await message.channel.send(embed=emb)
+            view = build_counting_record_embed(self.settings, message.guild, value, state.highscore)
+            await message.channel.send(view=view)
 
         return
 
@@ -759,7 +759,7 @@ class CountingService:
         expected: int | None,
         got: int | None,
     ):
-        emb = build_counting_fail_embed(
+        view = build_counting_fail_embed(
             self.settings,
             message.guild,
             reason=reason,
@@ -770,7 +770,7 @@ class CountingService:
             reset_to=state.current_number,
         )
         try:
-            await message.reply(embed=emb, mention_author=False)
+            await message.reply(view=view, mention_author=False)
         except Exception:
             try:
                 exp = str(expected) if expected is not None else "—"

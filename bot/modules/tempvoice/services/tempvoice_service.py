@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from bot.core.perms import is_staff
 from bot.modules.tempvoice.views.tempvoice_panel import TempVoicePanelView
 from bot.modules.tempvoice.formatting.tempvoice_embeds import (
-    build_tempvoice_panel_embed,
+    build_tempvoice_panel_container,
     build_tempvoice_invite_embed,
 )
 from bot.utils.emojis import em
@@ -210,10 +210,10 @@ class TempVoiceService:
             return None
         locked = self._is_locked(guild, channel)
         private = self._is_private(guild, channel)
-        emb = build_tempvoice_panel_embed(self.settings, guild, owner, channel, locked, private)
-        view = TempVoicePanelView(self, channel.id, owner.id, locked, private)
+        container = build_tempvoice_panel_container(self.settings, guild, owner, channel, locked, private)
+        view = TempVoicePanelView(self, channel.id, owner.id, locked, private, container=container)
         try:
-            return await ch.send(content=f"{owner.mention} {self._panel_mention()}", embed=emb, view=view)
+            return await ch.send(content=f"{owner.mention} {self._panel_mention()}", view=view)
         except Exception:
             return None
 
@@ -241,17 +241,17 @@ class TempVoiceService:
             return
         locked = self._is_locked(guild, ch)
         private = self._is_private(guild, ch)
-        emb = build_tempvoice_panel_embed(self.settings, guild, owner, ch, locked, private)
-        view = TempVoicePanelView(self, ch.id, owner.id, locked, private)
+        container = build_tempvoice_panel_container(self.settings, guild, owner, ch, locked, private)
+        view = TempVoicePanelView(self, ch.id, owner.id, locked, private, container=container)
         if panel_msg_id:
             try:
                 msg = await panel_ch.fetch_message(int(panel_msg_id))
-                await msg.edit(content=f"{owner.mention} {self._panel_mention()}", embed=emb, view=view)
+                await msg.edit(content=f"{owner.mention} {self._panel_mention()}", view=view)
                 return
             except Exception:
                 pass
         try:
-            msg = await panel_ch.send(content=f"{owner.mention} {self._panel_mention()}", embed=emb, view=view)
+            msg = await panel_ch.send(content=f"{owner.mention} {self._panel_mention()}", view=view)
             await self.db.set_tempvoice_panel_message(guild.id, ch.id, panel_ch.id, msg.id)
         except Exception:
             pass
@@ -436,8 +436,8 @@ class TempVoiceService:
         except Exception:
             return await interaction.response.send_message("Konnte nicht einladen.", ephemeral=True)
         try:
-            emb = build_tempvoice_invite_embed(self.settings, interaction.guild, interaction.user, channel)
-            await member.send(embed=emb)
+            view = build_tempvoice_invite_embed(self.settings, interaction.guild, interaction.user, channel)
+            await member.send(view=view)
         except Exception:
             pass
         await interaction.response.send_message(f"{member.mention} eingeladen.", ephemeral=True)

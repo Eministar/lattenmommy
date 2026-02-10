@@ -37,7 +37,25 @@ def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
             emb.set_footer(text=str(ft))
 
 
-def build_summary_embed(
+def _add_banner(container: discord.ui.Container, banner_url: str | None):
+    if not banner_url:
+        return
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=banner_url)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
+def _wrap(container: discord.ui.Container) -> discord.ui.LayoutView:
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(container)
+    return view
+
+
+def build_summary_container(
     settings,
     guild: discord.Guild | None,
     user: discord.User,
@@ -68,15 +86,39 @@ def build_summary_embed(
         "Nutze die Buttons unten für Claim, Status, Priorität, Eskalation oder Transcript."
     )
 
-    emb = discord.Embed(
-        title=f"{book} 𑁉 SUPPORT-TICKET - ZUSAMMENFASSUNG",
-        description=desc,
-        color=_color(settings, guild),
+    header = f"**{book} 𑁉 SUPPORT-TICKET - ZUSAMMENFASSUNG**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.TICKETS_STAFF)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return container
+
+
+def build_summary_embed(
+    settings,
+    guild: discord.Guild | None,
+    user: discord.User,
+    member: discord.Member | None,
+    category_label: str,
+    created_at: datetime,
+    total_tickets: int,
+    priority: int | None = None,
+    status_label: str | None = None,
+    escalated_level: int | None = None,
+):
+    return _wrap(
+        build_summary_container(
+            settings,
+            guild,
+            user,
+            member,
+            category_label,
+            created_at,
+            total_tickets,
+            priority=priority,
+            status_label=status_label,
+            escalated_level=escalated_level,
+        )
     )
-    emb.set_thumbnail(url=user.display_avatar.url)
-    emb.set_image(url=Banners.TICKETS_STAFF)
-    _footer(emb, settings, guild)
-    return emb
 
 
 def _priority_label(priority: int | None) -> str:
@@ -93,18 +135,17 @@ def _priority_label(priority: int | None) -> str:
 
 
 def build_user_message_embed(settings, guild: discord.Guild | None, user: discord.User, content: str):
-    arrow2 = em(settings, "arrow2", guild)
+    arrow2 = em(settings, "arrow2", guild) or "»"
     desc = f"{arrow2} {content}" if content else f"{arrow2} "
-    emb = discord.Embed(description=desc, color=_color(settings, guild))
-    emb.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{user.display_name}** · <@{user.id}>"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_dm_ticket_created_embed(settings, guild: discord.Guild | None, ticket_id: int, created_at: datetime):
     book = em(settings, "book", guild)
-    arrow2 = em(settings, "arrow2", guild)
-    green = em(settings, "green", guild)
+    arrow2 = em(settings, "arrow2", guild) or "»"
 
     desc = (
         f"{arrow2} Dein Ticket wurde erstellt – unser Team antwortet dir hier per DM.\n\n"
@@ -114,19 +155,16 @@ def build_dm_ticket_created_embed(settings, guild: discord.Guild | None, ticket_
         f"Schreib einfach hier weiter, ich häng’s automatisch ans Ticket."
     )
 
-    emb = discord.Embed(
-        title=f"{book} 𑁉 SUPPORT-TICKET - BESTÄTIGUNG",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    emb.set_image(url=Banners.TICKETS_OPENED)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{book} 𑁉 SUPPORT-TICKET - BESTÄTIGUNG**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.TICKETS_OPENED)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_dm_message_appended_embed(settings, guild: discord.Guild | None, ticket_id: int):
-    arrow2 = em(settings, "arrow2", guild)
-    info = em(settings, "info", guild)
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    info = em(settings, "info", guild) or "ℹ️"
 
     desc = (
         f"{arrow2} Hab’s ans Ticket gehängt.\n\n"
@@ -134,18 +172,15 @@ def build_dm_message_appended_embed(settings, guild: discord.Guild | None, ticke
         f"┗`✅` - Info: Du bekommst Antworten vom Team hier per DM."
     )
 
-    emb = discord.Embed(
-        title=f"{info} 𑁉 NACHRICHT ÜBERNOMMEN",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} 𑁉 NACHRICHT ÜBERNOMMEN**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_dm_staff_reply_embed(settings, guild: discord.Guild | None, staff: discord.Member, ticket_id: int, text: str, reply_line: str | None = None):
     love = em(settings, "discord_love", guild)
-    arrow2 = em(settings, "arrow2", guild)
+    arrow2 = em(settings, "arrow2", guild) or "»"
 
     reply_block = f"{reply_line}\n\n" if reply_line else ""
     desc = (
@@ -154,20 +189,22 @@ def build_dm_staff_reply_embed(settings, guild: discord.Guild | None, staff: dis
         f"┗`📚` - Ticket-ID: `{ticket_id}`"
     )
 
-    emb = discord.Embed(
-        title=f"{love} 𑁉 TEAM-ANTWORT",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
-    emb.set_image(url=Banners.TICKETS_ANSWER)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{love} 𑁉 TEAM-ANTWORT**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.TICKETS_ANSWER)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
-def build_dm_ticket_closed_embed(settings, guild: discord.Guild | None, ticket_id: int, closed_at: datetime, rating_enabled: bool):
-    red = em(settings, "red", guild)
-    arrow2 = em(settings, "arrow2", guild)
+def build_dm_ticket_closed_container(
+    settings,
+    guild: discord.Guild | None,
+    ticket_id: int,
+    closed_at: datetime,
+    rating_enabled: bool,
+):
+    red = em(settings, "red", guild) or "🔴"
+    arrow2 = em(settings, "arrow2", guild) or "»"
 
     tail = "Bewerte den Support unten mit ⭐." if rating_enabled else "Wenn du nochmal was brauchst, schreib einfach neu."
     desc = (
@@ -177,19 +214,20 @@ def build_dm_ticket_closed_embed(settings, guild: discord.Guild | None, ticket_i
         f"{tail}"
     )
 
-    emb = discord.Embed(
-        title=f"{red} 𑁉 TICKET GESCHLOSSEN",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    emb.set_image(url=Banners.TICKETS_CLOSED)
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{red} 𑁉 TICKET GESCHLOSSEN**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, Banners.TICKETS_CLOSED)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return container
+
+
+def build_dm_ticket_closed_embed(settings, guild: discord.Guild | None, ticket_id: int, closed_at: datetime, rating_enabled: bool):
+    return _wrap(build_dm_ticket_closed_container(settings, guild, ticket_id, closed_at, rating_enabled))
 
 
 def build_dm_rating_thanks_embed(settings, guild: discord.Guild | None, rating: int):
-    cheers = em(settings, "cheers", guild)
-    arrow2 = em(settings, "arrow2", guild)
+    cheers = em(settings, "cheers", guild) or "🎉"
+    arrow2 = em(settings, "arrow2", guild) or "»"
 
     desc = (
         f"{arrow2} Danke für deine Bewertung! 💜\n\n"
@@ -197,31 +235,25 @@ def build_dm_rating_thanks_embed(settings, guild: discord.Guild | None, rating: 
         f"┗`📌` - Info: Hilft uns extrem, den Support besser zu machen."
     )
 
-    emb = discord.Embed(
-        title=f"{cheers} 𑁉 BEWERTUNG GESPEICHERT",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{cheers} 𑁉 BEWERTUNG GESPEICHERT**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_dm_ticket_added_embed(settings, guild: discord.Guild | None, ticket_id: int, added_by: discord.Member):
-    info = em(settings, "info", guild)
-    arrow2 = em(settings, "arrow2", guild)
+    info = em(settings, "info", guild) or "ℹ️"
+    arrow2 = em(settings, "arrow2", guild) or "»"
     desc = (
         f"{arrow2} Du wurdest zu einem Ticket hinzugefügt.\n\n"
         f"• Ticket-ID: `{ticket_id}`\n"
         f"• Hinzugefügt von: **{added_by.display_name}**\n\n"
         f"Schreib einfach hier, deine Nachricht landet im Ticket."
     )
-    emb = discord.Embed(
-        title=f"{info} TICKET-ZUGANG",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} TICKET-ZUGANG**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_thread_status_embed(
@@ -232,47 +264,45 @@ def build_thread_status_embed(
     actor: discord.Member | None = None,
     banner_url: str | None = None,
 ):
-    arrow2 = em(settings, "arrow2", guild)
-    emb = discord.Embed(
-        title=title,
-        description=f"{arrow2} {text}",
-        color=_color(settings, guild),
-    )
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    header = f"**{title}**"
+    body = f"{arrow2} {text}"
     if actor:
-        emb.set_author(name=actor.display_name, icon_url=actor.display_avatar.url)
-    if banner_url:
-        emb.set_image(url=banner_url)
-    _footer(emb, settings, guild)
-    return emb
+        body = f"{body}\n\n┗`👤` - {actor.display_name}"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, banner_url)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{body}"))
+    return _wrap(container)
 
 
 def build_thread_rating_embed(settings, guild: discord.Guild | None, user_id: int, rating: int, comment: str | None):
-    hearts = em(settings, "hearts", guild)
+    hearts = em(settings, "hearts", guild) or "💜"
 
     desc = f"┏`⭐` - Bewertung: **{rating}/5**\n┗`👤` - User: <@{user_id}>"
     if comment:
         desc += f"\n\n{comment}"
 
-    emb = discord.Embed(
-        title=f"{hearts} 𑁉 BEWERTUNG",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{hearts} 𑁉 BEWERTUNG**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
-def build_dm_ticket_update_embed(settings, guild: discord.Guild | None, title: str, text: str):
+def build_dm_ticket_update_embed(
+    settings,
+    guild: discord.Guild | None,
+    title: str,
+    text: str,
+    banner_url: str | None = None,
+):
     info = em(settings, "info", guild) or "ℹ️"
     arrow2 = em(settings, "arrow2", guild) or "»"
     desc = f"{arrow2} {text}"
-    emb = discord.Embed(
-        title=f"{info} 𑁉 {title}",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} 𑁉 {title}**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container, banner_url)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_dm_ticket_forwarded_embed(
@@ -290,13 +320,10 @@ def build_dm_ticket_forwarded_embed(
         f"┗`📝` - Grund: {reason_text}\n\n"
         "Sobald jemand verfügbar ist, meldet sich das Team bei dir."
     )
-    emb = discord.Embed(
-        title=f"{info} 𑁉 TICKET WEITERGELEITET",
-        description=desc,
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} 𑁉 TICKET WEITERGELEITET**"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    return _wrap(container)
 
 
 def build_ticket_log_embed(
@@ -318,13 +345,11 @@ def build_ticket_log_embed(
         f"┣`👤` - Actor: {actor_line}\n"
         f"┗`📝` - Info: {text}"
     )
-    emb = discord.Embed(
-        title=f"{info} 𑁉 {title}",
-        description=f"{arrow2} Ticket-Event\n\n{desc}",
-        color=_color(settings, guild),
-    )
-    _footer(emb, settings, guild)
-    return emb
+    header = f"**{info} 𑁉 {title}**"
+    body = f"{arrow2} Ticket-Event\n\n{desc}"
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{body}"))
+    return _wrap(container)
 
 
 def build_support_panel_embed(
@@ -334,42 +359,8 @@ def build_support_panel_embed(
     open_: int,
     active: int,
 ):
-    lifebuoy = em(settings, "lifebuoy", guild) or "🛟"
-    arrow2 = em(settings, "arrow2", guild) or "»"
-    stats = em(settings, "stats", guild) or "📈"
-    sparkles = em(settings, "sparkles", guild) or "✨"
-    emb = discord.Embed(
-        title=f"{lifebuoy} 𑁉 SUPPORT-PANEL",
-        description=(
-            f"{arrow2} Hilfe in Minuten – klar, strukturiert und persönlich.\n\n"
-            f"{sparkles} **Jetzt Ticket eröffnen** und dein Anliegen direkt beschreiben."
-        ),
-        color=_color(settings, guild),
-    )
-    emb.set_image(url=Banners.SUPPORT)
-    emb.add_field(
-        name="So funktioniert es",
-        value=(
-            "1) Button klicken\n"
-            "2) Du bekommst eine DM\n"
-            "3) Anliegen beschreiben\n"
-            "4) Team antwortet im Ticket"
-        ),
-        inline=False,
-    )
-    emb.add_field(
-        name=f"{stats} Live-Stats",
-        value=(
-            f"Tickets gesamt: **{total}**\n"
-            f"Offen: **{open_}**\n"
-            f"Aktive User (24h): **{active}**"
-        ),
-        inline=False,
-    )
-    if guild and guild.icon:
-        emb.set_thumbnail(url=guild.icon.url)
-    _footer(emb, settings, guild)
-    return emb
+    container = build_support_panel_container(settings, guild, total, open_, active)
+    return _wrap(container)
 
 
 def _add_support_panel_banner(container: discord.ui.Container):
@@ -388,7 +379,7 @@ def build_support_panel_container(
     total: int,
     open_: int,
     active: int,
-    button: discord.ui.Button,
+    button: discord.ui.Button | None = None,
 ):
     arrow2 = em(settings, "arrow2", guild) or "»"
     lifebuoy = em(settings, "lifebuoy", guild) or "🛟"
@@ -417,7 +408,8 @@ def build_support_panel_container(
     container.add_item(discord.ui.TextDisplay(f"**So funktioniert es**\n{flow}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(f"**{stats} Live-Stats**\n{stats_block}"))
-    row = discord.ui.ActionRow()
-    row.add_item(button)
-    container.add_item(row)
+    if button:
+        row = discord.ui.ActionRow()
+        row.add_item(button)
+        container.add_item(row)
     return container

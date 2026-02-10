@@ -58,6 +58,31 @@ class WelcomeService:
         except Exception:
             return 0xB16B91
 
+    def _add_banner(self, container: discord.ui.Container):
+        try:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=Banners.WELCOME)
+            container.add_item(gallery)
+            container.add_item(discord.ui.Separator())
+        except Exception:
+            pass
+
+    def _build_welcome_view(self, member: discord.Member, preset: str, member_count: int) -> discord.ui.LayoutView:
+        guild = member.guild
+        header = "**👋 𑁉 WILLKOMMEN**"
+        desc = (
+            f"{preset}\n\n"
+            f"┏`👤` - User: {member.mention}\n"
+            f"┣`🏠` - Server: **{guild.name}**\n"
+            f"┗`👥` - Members: **{member_count}**"
+        )
+        container = discord.ui.Container(accent_colour=self._embed_color(member))
+        self._add_banner(container)
+        container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+        view = discord.ui.LayoutView(timeout=None)
+        view.add_item(container)
+        return view
+
     async def _resolve_channel(self, guild: discord.Guild, channel_id: int) -> discord.abc.Messageable | None:
         if not channel_id:
             return None
@@ -87,20 +112,6 @@ class WelcomeService:
         preset = random.choice(presets) if presets else "Schön, dass du da bist!"
         member_count = guild.member_count or len(guild.members)
 
-        title = "👋 𑁉 WILLKOMMEN"
-        desc = (
-            f"{preset}\n\n"
-            f"┏`👤` - User: {member.mention}\n"
-            f"┣`🏠` - Server: **{guild.name}**\n"
-            f"┗`👥` - Members: **{member_count}**"
-        )
-        emb = discord.Embed(title=title, description=desc, color=self._embed_color(member))
-        emb.set_thumbnail(url=member.display_avatar.url)
-        emb.set_image(url=Banners.WELCOME)
-        footer = str(self.settings.get_guild(guild.id, "design.footer_text", "") or "").strip()
-        if footer:
-            emb.set_footer(text=footer)
-
         small_text = self._small_text(guild.id)
         if small_text and small_ch:
             try:
@@ -109,7 +120,8 @@ class WelcomeService:
                 pass
         if embed_ch:
             try:
-                await embed_ch.send(embed=emb)
+                view = self._build_welcome_view(member, preset, member_count)
+                await embed_ch.send(view=view)
             except Exception:
                 pass
 

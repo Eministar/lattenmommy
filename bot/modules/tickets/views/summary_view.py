@@ -157,20 +157,29 @@ class CategorySelect(discord.ui.Select):
         await self.service.change_category(interaction, value)
 
 
-class SummaryView(discord.ui.View):
-    def __init__(self, service, ticket_id: int, claimed: bool = False, status: str = "open"):
+class SummaryView(discord.ui.LayoutView):
+    def __init__(
+        self,
+        service,
+        ticket_id: int,
+        claimed: bool = False,
+        status: str = "open",
+        container: discord.ui.Container | None = None,
+    ):
         super().__init__(timeout=None)
         self.service = service
         self.ticket_id = int(ticket_id)
         self.claimed = bool(claimed)
         self.status = str(status or "open")
 
+        if container:
+            self.add_item(container)
+
         self.btn_claim = discord.ui.Button(
             custom_id="starry:ticket_claim",
             style=discord.ButtonStyle.success,
             label="Ticket beanspruchen",
             emoji="✅",
-            row=0,
         )
         self.btn_claim.callback = self._on_claim
 
@@ -179,7 +188,6 @@ class SummaryView(discord.ui.View):
             style=discord.ButtonStyle.primary,
             label="Team-Notiz",
             emoji="📝",
-            row=0,
         )
         self.btn_note.callback = self._on_note
 
@@ -188,7 +196,6 @@ class SummaryView(discord.ui.View):
             style=discord.ButtonStyle.danger,
             label="Ticket schließen",
             emoji="🔒",
-            row=0,
         )
         self.btn_close.callback = self._on_close
 
@@ -197,7 +204,6 @@ class SummaryView(discord.ui.View):
             style=discord.ButtonStyle.secondary,
             label="Ticket wieder öffnen",
             emoji="🔓",
-            row=0,
         )
         self.btn_reopen.callback = self._on_reopen
 
@@ -206,7 +212,6 @@ class SummaryView(discord.ui.View):
             style=discord.ButtonStyle.secondary,
             label="Transcript",
             emoji="🧾",
-            row=0,
         )
         self.btn_transcript.callback = self._on_transcript
 
@@ -215,26 +220,37 @@ class SummaryView(discord.ui.View):
             style=discord.ButtonStyle.secondary,
             label="Eskalieren",
             emoji="⚠️",
-            row=1,
         )
         self.btn_escalate.callback = self._on_escalate
 
         self.select_priority = PrioritySelect(self.service)
-        self.select_priority.row = 2
         self.select_status = StatusSelect(self.service)
-        self.select_status.row = 3
         self.select_category = CategorySelect(self.service)
-        self.select_category.row = 4
 
-        self.add_item(self.btn_claim)
-        self.add_item(self.btn_note)
-        self.add_item(self.btn_close)
-        self.add_item(self.btn_reopen)
-        self.add_item(self.btn_transcript)
-        self.add_item(self.btn_escalate)
-        self.add_item(self.select_priority)
-        self.add_item(self.select_status)
-        self.add_item(self.select_category)
+        row_main = discord.ui.ActionRow()
+        row_main.add_item(self.btn_claim)
+        row_main.add_item(self.btn_note)
+        row_main.add_item(self.btn_close)
+        row_main.add_item(self.btn_reopen)
+        row_main.add_item(self.btn_transcript)
+
+        row_escalate = discord.ui.ActionRow()
+        row_escalate.add_item(self.btn_escalate)
+
+        row_priority = discord.ui.ActionRow()
+        row_priority.add_item(self.select_priority)
+
+        row_status = discord.ui.ActionRow()
+        row_status.add_item(self.select_status)
+
+        row_category = discord.ui.ActionRow()
+        row_category.add_item(self.select_category)
+
+        self.add_item(row_main)
+        self.add_item(row_escalate)
+        self.add_item(row_priority)
+        self.add_item(row_status)
+        self.add_item(row_category)
 
         self._apply_claim_state()
 

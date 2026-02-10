@@ -129,8 +129,16 @@ class RegionSelect(discord.ui.Select):
         await self.view_ref.service.set_region(interaction, self.view_ref.channel_id, self.values[0])
 
 
-class TempVoicePanelView(discord.ui.View):
-    def __init__(self, service, channel_id: int, owner_id: int, locked: bool, private: bool):
+class TempVoicePanelView(discord.ui.LayoutView):
+    def __init__(
+        self,
+        service,
+        channel_id: int,
+        owner_id: int,
+        locked: bool,
+        private: bool,
+        container: discord.ui.Container | None = None,
+    ):
         super().__init__(timeout=3600)
         self.service = service
         self.channel_id = int(channel_id)
@@ -140,11 +148,13 @@ class TempVoicePanelView(discord.ui.View):
         self.selected_action = None
         self.selected_user = None
 
+        if container:
+            self.add_item(container)
+
         self.btn_rename = discord.ui.Button(
             label="Name aendern",
             emoji="✏️",
             style=discord.ButtonStyle.primary,
-            row=0,
         )
         self.btn_rename.callback = self._on_rename
 
@@ -152,7 +162,6 @@ class TempVoicePanelView(discord.ui.View):
             label="User-Limit",
             emoji="👥",
             style=discord.ButtonStyle.secondary,
-            row=0,
         )
         self.btn_limit.callback = self._on_limit
 
@@ -160,7 +169,6 @@ class TempVoicePanelView(discord.ui.View):
             label="Bitrate",
             emoji="🎛️",
             style=discord.ButtonStyle.secondary,
-            row=0,
         )
         self.btn_bitrate.callback = self._on_bitrate
 
@@ -168,7 +176,6 @@ class TempVoicePanelView(discord.ui.View):
             label="Entsperren" if self.locked else "Sperren",
             emoji="🔓" if self.locked else "🔒",
             style=discord.ButtonStyle.success if self.locked else discord.ButtonStyle.danger,
-            row=1,
         )
         self.btn_lock.callback = self._on_lock
 
@@ -176,26 +183,37 @@ class TempVoicePanelView(discord.ui.View):
             label="Oeffentlich" if self.private else "Privat",
             emoji="🌐" if self.private else "🙈",
             style=discord.ButtonStyle.success if self.private else discord.ButtonStyle.secondary,
-            row=1,
         )
         self.btn_public.callback = self._on_public
 
         self.select_region = RegionSelect(self)
-        self.select_region.row = 2
 
         self.action_select = ActionSelect(self)
-        self.action_select.row = 3
         self.user_select = UserSelect(self)
-        self.user_select.row = 4
 
-        self.add_item(self.btn_rename)
-        self.add_item(self.btn_limit)
-        self.add_item(self.btn_bitrate)
-        self.add_item(self.btn_lock)
-        self.add_item(self.btn_public)
-        self.add_item(self.select_region)
-        self.add_item(self.action_select)
-        self.add_item(self.user_select)
+        row_main = discord.ui.ActionRow()
+        row_main.add_item(self.btn_rename)
+        row_main.add_item(self.btn_limit)
+        row_main.add_item(self.btn_bitrate)
+
+        row_lock = discord.ui.ActionRow()
+        row_lock.add_item(self.btn_lock)
+        row_lock.add_item(self.btn_public)
+
+        row_region = discord.ui.ActionRow()
+        row_region.add_item(self.select_region)
+
+        row_action = discord.ui.ActionRow()
+        row_action.add_item(self.action_select)
+
+        row_user = discord.ui.ActionRow()
+        row_user.add_item(self.user_select)
+
+        self.add_item(row_main)
+        self.add_item(row_lock)
+        self.add_item(row_region)
+        self.add_item(row_action)
+        self.add_item(row_user)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
