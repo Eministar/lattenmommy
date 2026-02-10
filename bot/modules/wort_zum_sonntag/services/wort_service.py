@@ -80,15 +80,24 @@ class WortZumSonntagService:
         return f"💡 Weisheit · {base}"[:100]
 
     def _status_tag_name(self, status: str) -> str:
-        s = str(status or "pending")
-        if s == "accepted" or s == "posted":
-            return "Angenommen"
+        s = str(status or "pending").lower()
+        if s == "accepted":
+            return "✅ ANGENOMMEN"
+        if s == "posted":
+            return "📣 GEPOSTET"
         if s == "rejected":
-            return "Abgelehnt"
-        return "Erwartet"
+            return "⛔ ABGELEHNT"
+        return "⏳ ERWARTET"
 
     def _status_tag_names(self) -> set[str]:
-        return {"erwartet", "angenommen", "abgelehnt"}
+        legacy = {"erwartet", "angenommen", "abgelehnt", "gepostet"}
+        current = {
+            self._status_tag_name("pending"),
+            self._status_tag_name("accepted"),
+            self._status_tag_name("rejected"),
+            self._status_tag_name("posted"),
+        }
+        return {name.lower() for name in (legacy | current)}
 
     async def _ensure_status_tag(self, forum: discord.ForumChannel, status: str) -> discord.ForumTag | None:
         name = self._status_tag_name(status)

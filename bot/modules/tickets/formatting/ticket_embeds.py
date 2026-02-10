@@ -62,7 +62,7 @@ def build_summary_embed(
         f"┗`📬` - Hat bereits {total_tickets} Tickets erstellt.\n\n"
         f"┏`📚` - Ticket-Thema: {category_label}\n"
         f"┣`🚦` - Priorität: { _priority_label(priority) }\n"
-        f"┣`🏷️` - Status: {status_label if status_label else 'offen'}\n"
+        f"┣`🏷️` - Status: {status_label if status_label else '🟢 OFFEN'}\n"
         f"┣`⚠️` - Eskalation: {int(escalated_level) if escalated_level else 0}\n"
         f"┗`⏰` - Ticket erstellt: {format_dt(created_at, style='f')}\n\n"
         "Nutze die Buttons unten für Claim, Status, Priorität, Eskalation oder Transcript."
@@ -110,7 +110,7 @@ def build_dm_ticket_created_embed(settings, guild: discord.Guild | None, ticket_
         f"{arrow2} Dein Ticket wurde erstellt – unser Team antwortet dir hier per DM.\n\n"
         f"┏`📚` - Ticket-ID: `{ticket_id}`\n"
         f"┣`⏰` - Erstellt: {format_dt(created_at, style='f')}\n"
-        f"┗`🟢` - Status: Offen\n\n"
+        f"┗`🟢` - Status: OFFEN\n\n"
         f"Schreib einfach hier weiter, ich häng’s automatisch ans Ticket."
     )
 

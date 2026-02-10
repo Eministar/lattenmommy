@@ -21,6 +21,13 @@ def _color(settings, guild: discord.Guild | None):
     return parse_hex_color(value)
 
 
+def _clip(text: str, limit: int) -> str:
+    t = str(text or "").strip()
+    if len(t) <= limit:
+        return t
+    return t[: max(0, limit - 3)].rstrip() + "..."
+
+
 def _footer(emb: discord.Embed, settings, guild: discord.Guild | None):
     if guild:
         ft = settings.get_guild(guild.id, "design.footer_text", None)
@@ -39,6 +46,16 @@ def _apply_banner(emb: discord.Embed):
     emb.set_image(url=Banners.APPLICATION)
 
 
+def _add_banner(container: discord.ui.Container):
+    try:
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media=Banners.APPLICATION)
+        container.add_item(gallery)
+        container.add_item(discord.ui.Separator())
+    except Exception:
+        pass
+
+
 def _add_panel_banner(container: discord.ui.Container):
     try:
         gallery = discord.ui.MediaGallery()
@@ -49,29 +66,63 @@ def _add_panel_banner(container: discord.ui.Container):
         pass
 
 
-def build_application_embed(settings, guild: discord.Guild | None, user: discord.User, questions: list[str], answers: list[str]):
-    info = em(settings, "info", guild) or "ℹ️"
-    arrow2 = em(settings, "arrow2", guild) or "»"
-    desc = f"{arrow2} Neue Bewerbung eingegangen. Bitte prüft die Antworten sorgfältig."
-    emb = discord.Embed(title=f"{info} 𑁉 BEWERBUNG", description=desc, color=_color(settings, guild))
-    emb.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-    _apply_banner(emb)
+def _resolve_user_line(user: discord.User | int | None) -> tuple[int, str]:
+    try:
+        user_id = int(getattr(user, "id", 0) or int(user or 0))
+    except Exception:
+        user_id = 0
+    return user_id, f"<@{user_id}>" if user_id else "—"
+
+
+def _qa_block(questions: list[str], answers: list[str]) -> str:
+    lines = []
     for idx, q in enumerate(questions):
         a = answers[idx] if idx < len(answers) else "-"
-        emb.add_field(name=f"{idx + 1}. {q}", value=a[:1024] or "-", inline=False)
-    _footer(emb, settings, guild)
-    return emb
+        clean_q = str(q or "").strip() or "Frage"
+        clean_a = _clip(str(a or "-").strip(), 900) or "-"
+        lines.append(f"**{idx + 1}. {clean_q}**\n{clean_a}")
+    return "\n\n".join(lines) if lines else "—"
+
+
+def build_application_container(settings, guild: discord.Guild | None, user: discord.User | int, questions: list[str], answers: list[str]):
+    info = em(settings, "info", guild) or "ℹ️"
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    header = f"**{info} 𑁉 BEWERBUNG**"
+    desc = f"{arrow2} Neue Bewerbung eingegangen. Bitte prüft die Antworten sorgfältig."
+
+    user_id, user_line = _resolve_user_line(user)
+    meta = (
+        f"┏`👤` - Von: {user_line}\n"
+        f"┗`🧾` - Antworten: {len(answers)}/{len(questions)}"
+    )
+    qa_text = _qa_block(questions, answers)
+
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}\n\n{meta}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(qa_text))
+    return container
+
+
+def build_application_embed(settings, guild: discord.Guild | None, user: discord.User | int, questions: list[str], answers: list[str]):
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(build_application_container(settings, guild, user, questions, answers))
+    return view
 
 
 def build_application_dm_embed(settings, guild: discord.Guild | None, questions: list[str]):
     info = em(settings, "info", guild) or "ℹ️"
     arrow2 = em(settings, "arrow2", guild) or "»"
     lines = [f"{i+1}. {q}" for i, q in enumerate(questions)]
+    header = f"**{info} 𑁉 BEWERBUNG STARTEN**"
     desc = f"{arrow2} Bitte beantworte die folgenden Fragen – klar und ehrlich.\n\n" + "\n".join(lines)
-    emb = discord.Embed(title=f"{info} 𑁉 BEWERBUNG STARTEN", description=desc, color=_color(settings, guild))
-    _apply_banner(emb)
-    _footer(emb, settings, guild)
-    return emb
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(container)
+    return view
 
 
 def build_application_panel_embed(
@@ -164,23 +215,25 @@ def build_application_followup_dm_embed(
 ):
     arrow2 = em(settings, "arrow2", guild) or "»"
     chat = em(settings, "chat", guild) or "💬"
-    title = f"{chat} 𑁉 WICHTIGE RÜCKFRAGE"
+    header = f"**{chat} 𑁉 WICHTIGE RÜCKFRAGE**"
     desc = (
         f"{arrow2} Wir haben noch eine kurze Rückfrage zu deiner Bewerbung.\n"
         "Bitte antworte direkt hier in der DM."
     )
-    emb = discord.Embed(title=title, description=desc, color=_color(settings, guild))
-    _apply_banner(emb)
-    emb.add_field(name="FRAGE", value=f"**{question.strip()}**", inline=False)
-    emb.add_field(
-        name="DEIN BEDÜRFNIS",
-        value="Wir möchten deine Bewerbung bestmöglich verstehen – nimm dir kurz Zeit für deine Antwort.",
-        inline=False,
+    question_text = str(question or "").strip() or "—"
+    body = (
+        f"**FRAGE**\n{question_text}\n\n"
+        "**DEIN BEDÜRFNIS**\nWir möchten deine Bewerbung bestmöglich verstehen – nimm dir kurz Zeit für deine Antwort."
     )
-    if staff:
-        emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
-    _footer(emb, settings, guild)
-    return emb
+
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(body))
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(container)
+    return view
 
 
 def build_application_followup_answer_embed(
@@ -192,14 +245,20 @@ def build_application_followup_answer_embed(
 ):
     arrow2 = em(settings, "arrow2", guild) or "»"
     pen = em(settings, "pen", guild) or "📝"
+    header = f"**{pen} 𑁉 RÜCKFRAGE BEANTWORTET**"
     desc = f"{arrow2} Rückfrage beantwortet von {user.mention}."
-    emb = discord.Embed(title=f"{pen} 𑁉 RÜCKFRAGE BEANTWORTET", description=desc, color=_color(settings, guild))
-    _apply_banner(emb)
-    emb.add_field(name="FRAGE", value=question.strip()[:1024], inline=False)
-    emb.add_field(name="ANTWORT", value=answer.strip()[:1024], inline=False)
-    emb.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-    _footer(emb, settings, guild)
-    return emb
+    q_text = _clip(str(question or "").strip(), 900) or "—"
+    a_text = _clip(str(answer or "").strip(), 900) or "—"
+    body = f"**FRAGE**\n{q_text}\n\n**ANTWORT**\n{a_text}"
+
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(body))
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(container)
+    return view
 
 
 def build_application_decision_embed(
@@ -211,10 +270,14 @@ def build_application_decision_embed(
     arrow2 = em(settings, "arrow2", guild) or "»"
     badge = em(settings, "badge", guild) or ("✅" if accepted else "⛔")
     status_text = "ANGENOMMEN" if accepted else "ABGELEHNT"
+    header = f"**{badge} 𑁉 BEWERBUNG {status_text}**"
     desc = f"{arrow2} Entscheidung wurde gespeichert: **{status_text}**."
-    emb = discord.Embed(title=f"{badge} 𑁉 BEWERBUNG {status_text}", description=desc, color=_color(settings, guild))
-    _apply_banner(emb)
-    if staff:
-        emb.set_author(name=staff.display_name, icon_url=staff.display_avatar.url)
-    _footer(emb, settings, guild)
-    return emb
+    who = staff.mention if staff else "—"
+    meta = f"┗`👤` - Entscheider: {who}"
+
+    container = discord.ui.Container(accent_colour=_color(settings, guild))
+    _add_banner(container)
+    container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}\n\n{meta}"))
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(container)
+    return view

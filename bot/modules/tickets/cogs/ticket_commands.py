@@ -45,7 +45,7 @@ class TicketCommands(commands.Cog):
         await self.service.reopen_ticket(interaction)
 
     @ticket.command(name="status", description="🏷️ 𑁉 Ticket-Status ändern")
-    @app_commands.describe(label="z.B. wartet_auf_user, on_hold, in_arbeit")
+    @app_commands.describe(label="z.B. 🟢 OFFEN, ⏳ WARTET AUF ANTWORT")
     async def status(self, interaction: discord.Interaction, label: str):
         await self.service.set_status_label(interaction, label)
 

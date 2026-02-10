@@ -29,7 +29,7 @@ class StatusModal(discord.ui.Modal):
             required=True,
             max_length=32,
             style=discord.TextStyle.short,
-            placeholder="z.B. wartet_auf_user",
+            placeholder="z.B. 🟢 OFFEN",
         )
         self.add_item(self.status)
 
@@ -97,11 +97,11 @@ class StatusSelect(discord.ui.Select):
     def __init__(self, service):
         self.service = service
         labels = service.settings.get("ticket.status_labels", None) or [
-            "offen",
-            "wartet_auf_user",
-            "in_arbeit",
-            "on_hold",
-            "eskaliert",
+            "🟢 OFFEN",
+            "⏳ WARTET AUF ANTWORT",
+            "🛠️ IN BEARBEITUNG",
+            "⏸️ WARTEND",
+            "🚨 ESKALATION",
         ]
         options = []
         seen = set()
@@ -110,7 +110,7 @@ class StatusSelect(discord.ui.Select):
             if not text or text in seen:
                 continue
             seen.add(text)
-            options.append(discord.SelectOption(label=text, value=text, emoji="🏷️"))
+            options.append(discord.SelectOption(label=text, value=text))
         options.append(discord.SelectOption(label="Custom…", value="__custom__", emoji="✍️"))
         super().__init__(
             placeholder="Status setzen…",

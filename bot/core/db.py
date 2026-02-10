@@ -1438,7 +1438,7 @@ class Database:
 
     async def get_application(self, app_id: int):
         cur = await self._conn.execute("""
-        SELECT id, guild_id, user_id, thread_id, status, created_at, closed_at
+        SELECT id, guild_id, user_id, thread_id, status, created_at, closed_at, questions_json, answers_json
         FROM applications
         WHERE id = ?
         LIMIT 1;

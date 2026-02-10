@@ -48,18 +48,14 @@ def _fmt_dt(value: str | None) -> str:
 
 
 def _status_label(settings, guild: discord.Guild | None, status: str) -> tuple[str, str]:
-    s = str(status or "pending")
-    orange = em(settings, "orange", guild) or "🟠"
-    green = em(settings, "green", guild) or "🟢"
-    red = em(settings, "red", guild) or "🔴"
-    book = em(settings, "book", guild) or "📖"
+    s = str(status or "pending").lower()
     if s == "accepted":
-        return "ANGENOMMEN", green
+        return "✅ ANGENOMMEN", ""
     if s == "rejected":
-        return "ABGELEHNT", red
+        return "⛔ ABGELEHNT", ""
     if s == "posted":
-        return "GEPOSTET", book
-    return "ERWARTET", orange
+        return "📣 GEPOSTET", ""
+    return "⏳ ERWARTET", ""
 
 
 def _add_banner(container: discord.ui.Container, banner_url: str):
@@ -159,6 +155,7 @@ def build_submission_view(settings, guild: discord.Guild | None, data: dict) -> 
     content = _clip(str(data.get("content", "")).strip(), 1200)
     status = str(data.get("status") or "pending")
     label, status_emoji = _status_label(settings, guild, status)
+    status_text = f"{status_emoji} **{label}**".strip()
 
     created_at = _fmt_dt(data.get("created_at"))
     decided_at = _fmt_dt(data.get("decided_at"))
@@ -172,7 +169,7 @@ def build_submission_view(settings, guild: discord.Guild | None, data: dict) -> 
     meta = (
         f"┏`👤` - Von: <@{user_id}>\n"
         f"┣`⏰` - Eingereicht: {created_at}\n"
-        f"┗`📌` - Status: {status_emoji} **{label}**"
+        f"┗`📌` - Status: {status_text}"
     )
     quote = f"{arrow2} **Weisheit**\n>>> {content or '-'}"
 

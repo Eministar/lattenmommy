@@ -512,7 +512,7 @@ class TicketService:
             title = "🔓 𑁉 TICKET FREIGEGEBEN"
             desc = (
                 f"{arrow2} **{staff.display_name}** hat das Ticket freigegeben.\n\n"
-                "┏`🟢` - Status: Wieder offen\n"
+                "┏`🟢` - Status: WIEDER OFFEN\n"
                 "┗`📩` - Du kannst hier weiter per DM antworten."
             )
 
@@ -660,7 +660,7 @@ class TicketService:
             created_at=created_at,
             total_tickets=int(total),
             priority=2,
-            status_label="offen",
+            status_label="🟢 OFFEN",
             escalated_level=0,
         )
 

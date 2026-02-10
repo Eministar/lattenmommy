@@ -1,8 +1,10 @@
+import json
 import time
 import discord
 from bot.core.perms import is_staff
 from bot.modules.applications.formatting.application_embeds import (
     build_application_embed,
+    build_application_container,
     build_application_dm_embed,
     build_application_followup_dm_embed,
     build_application_followup_answer_embed,
@@ -68,9 +70,9 @@ class ApplicationService:
     async def start_dm_flow(self, user: discord.User, guild: discord.Guild | None):
         questions = self._questions()
         self._sessions[user.id] = {"idx": 0, "answers": [], "questions": questions, "guild_id": int(guild.id) if guild else 0}
-        emb = build_application_dm_embed(self.settings, guild, questions)
+        view = build_application_dm_embed(self.settings, guild, questions)
         try:
-            await user.send(embed=emb)
+            await user.send(view=view)
             await user.send(f"1/{len(questions)}: {questions[0]}")
         except Exception:
             pass
@@ -113,11 +115,10 @@ class ApplicationService:
                     except Exception:
                         thread = None
             if thread:
-                emb = build_application_followup_answer_embed(self.settings, guild, message.author, question, text)
-                view = ApplicationDecisionView(app_id=app_id) if app_id else None
+                view = build_application_followup_answer_embed(self.settings, guild, message.author, question, text)
                 header = f"Rückfrage von <@{staff_id}> an {message.author.mention}" if staff_id else None
                 try:
-                    await thread.send(content=header, embed=emb, view=view)
+                    await thread.send(content=header, view=view)
                 except Exception:
                     pass
             try:
@@ -184,12 +185,12 @@ class ApplicationService:
             return False, "forum_invalid"
 
         questions = self._questions()
-        embed = build_application_embed(self.settings, guild, interaction.user, questions, answers)
+        view = build_application_embed(self.settings, guild, interaction.user, questions, answers)
         mention_role_id = int(cfg.get("ping_role_id", 0) or 0)
         mention = f"<@&{mention_role_id}>" if mention_role_id else ""
         title = f"Bewerbung von {interaction.user.display_name}"
 
-        created = await forum.create_thread(name=title[:100], content=mention or None, embeds=[embed])
+        created = await forum.create_thread(name=title[:100], content=mention or None, view=view)
         thread = created.thread
 
         app_id = await self.db.create_application(guild.id, interaction.user.id, thread.id, questions, answers)
@@ -197,7 +198,8 @@ class ApplicationService:
             try:
                 starter = getattr(created, "message", None)
                 if starter:
-                    await starter.edit(view=ApplicationDecisionView(app_id=int(app_id)))
+                    container = build_application_container(self.settings, guild, interaction.user, questions, answers)
+                    await starter.edit(view=ApplicationDecisionView(app_id=int(app_id), container=container))
             except Exception:
                 pass
         await self.logger.emit(
@@ -228,9 +230,9 @@ class ApplicationService:
         question_text = (question or "").strip()
         if not question_text:
             return False, "question_missing"
-        emb = build_application_followup_dm_embed(self.settings, interaction.guild, interaction.user, question_text)
+        view = build_application_followup_dm_embed(self.settings, interaction.guild, interaction.user, question_text)
         try:
-            await user.send(embed=emb)
+            await user.send(view=view)
         except Exception as e:
             return False, f"dm_failed:{type(e).__name__}"
         self._followups.setdefault(int(user.id), []).append(
@@ -267,19 +269,40 @@ class ApplicationService:
         thread_id = int(row[3]) if row[3] is not None else 0
         thread = interaction.guild.get_thread(thread_id) if thread_id else None
         try:
-            emb = build_application_decision_embed(self.settings, interaction.guild, accepted, interaction.user)
+            view = build_application_decision_embed(self.settings, interaction.guild, accepted, interaction.user)
             if thread:
-                await thread.send(embed=emb)
+                await thread.send(view=view)
         except Exception:
             pass
         if user_id:
             try:
                 user = await self.bot.fetch_user(user_id)
-                emb = build_application_decision_embed(self.settings, interaction.guild, accepted, interaction.user)
-                await user.send(embed=emb)
+                view = build_application_decision_embed(self.settings, interaction.guild, accepted, interaction.user)
+                await user.send(view=view)
             except Exception:
                 pass
         return True, None
+
+    def _load_json_list(self, value) -> list[str]:
+        if not value:
+            return []
+        try:
+            data = json.loads(str(value))
+        except Exception:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [str(x) for x in data]
+
+    async def build_application_submission_view(self, guild: discord.Guild | None, app_id: int, disabled: bool = False):
+        row = await self.db.get_application(int(app_id))
+        if not row:
+            return None
+        questions = self._load_json_list(row[7] if len(row) > 7 else None)
+        answers = self._load_json_list(row[8] if len(row) > 8 else None)
+        user_id = int(row[2]) if row[2] is not None else 0
+        container = build_application_container(self.settings, guild, user_id, questions, answers)
+        return ApplicationDecisionView(app_id=int(app_id), container=container, disabled=disabled)
 
 
 class _FakeInteraction:
@@ -312,15 +335,23 @@ class _FakeInteraction:
             return False, "forum_invalid"
 
         questions = self._questions()
-        embed = build_application_embed(self.settings, guild, interaction.user, questions, answers)
+        view = build_application_embed(self.settings, guild, interaction.user, questions, answers)
         mention_role_id = int(cfg.get("ping_role_id", 0) or 0)
         mention = f"<@&{mention_role_id}>" if mention_role_id else ""
         title = f"📝 Bewerbung von {interaction.user.display_name}"
 
-        created = await forum.create_thread(name=title[:100], content=mention or None, embeds=[embed])
+        created = await forum.create_thread(name=title[:100], content=mention or None, view=view)
         thread = created.thread
 
         app_id = await self.db.create_application(guild.id, interaction.user.id, thread.id, questions, answers)
+        if app_id:
+            try:
+                starter = getattr(created, "message", None)
+                if starter:
+                    container = build_application_container(self.settings, guild, interaction.user, questions, answers)
+                    await starter.edit(view=ApplicationDecisionView(app_id=int(app_id), container=container))
+            except Exception:
+                pass
         await self.logger.emit(
             self.bot,
             "application_created",
@@ -330,9 +361,9 @@ class _FakeInteraction:
 
     async def send_dm_intro(self, user: discord.User, guild: discord.Guild | None):
         questions = self._questions()
-        emb = build_application_dm_embed(self.settings, guild, questions)
+        view = build_application_dm_embed(self.settings, guild, questions)
         try:
-            await user.send(embed=emb)
+            await user.send(view=view)
         except Exception:
             pass
         return questions
