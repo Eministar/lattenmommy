@@ -12,6 +12,7 @@ class Banners:
     APPLICATION = asset_url("application-banner.png")
     BEICHTE = asset_url("beichten-banner.png")
     BOT_ERROR = asset_url("bot-error-banner.png")
+    BOT_BANNER = asset_url("bot-banner.png")
     COUNTING = asset_url("counting-banner.png")
     ELECTION = asset_url("election-banner.png")
     GIVEAWAY = asset_url("giveaway-banner.png")

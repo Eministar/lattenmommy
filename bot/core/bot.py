@@ -64,6 +64,7 @@ from bot.modules.invites.services.invite_service import InviteService
 from bot.modules.invites.cogs.invite_listener import InviteListener
 from bot.modules.parlament.services.parlament_service import ParliamentService
 from bot.modules.parlament.cogs.parlament_commands import ParliamentCommands
+from bot.modules.bot_status.services.bot_status_service import BotStatusService
 
 from bot.core.presence import PresenceRotator
 from bot.modules.logs.forum_log_service import ForumLogService
@@ -108,6 +109,7 @@ class StarryBot(commands.Bot):
         self.beichte_service = BeichteService(self, self.settings, self.db, self.logger)
         self.parlament_service = ParliamentService(self, self.settings, self.db, self.logger)
         self.invite_service = InviteService(self, self.settings, self.db, self.logger)
+        self.bot_status_service = BotStatusService(self, self.settings, self.logger)
 
         self.forum_logs = ForumLogService(self, self.settings, self.db)
         self._boot_done = False
@@ -325,6 +327,11 @@ class StarryBot(commands.Bot):
                 await self.parlament_service.restore_views()
             except Exception:
                 pass
+        if self.bot_status_service:
+            try:
+                await self.bot_status_service.send_start()
+            except Exception:
+                pass
 
     async def on_error(self, event_method: str, *args, **kwargs):
         import sys
@@ -357,6 +364,14 @@ class StarryBot(commands.Bot):
                 await self.forum_logs.emit(guild, "bot_errors", emb)
         except Exception:
             pass
+
+    async def close(self):
+        if self.bot_status_service:
+            try:
+                await self.bot_status_service.send_stop()
+            except Exception:
+                pass
+        await super().close()
 
         try:
             await self.logger.emit_system("bot_error", {"where": where, "type": type(error).__name__, "msg": str(error)})
