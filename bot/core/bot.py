@@ -52,6 +52,11 @@ from bot.modules.tempvoice.cogs.tempvoice_commands import TempVoiceCommands
 from bot.modules.tempvoice.services.tempvoice_service import TempVoiceService
 from bot.modules.tickets.views.support_panel import SupportPanelView
 from bot.modules.fun.cogs.fun_commands import FunCommands
+from bot.modules.ping.cogs.ping_commands import PingCommands
+from bot.modules.suggestions.services.suggestion_service import SuggestionService
+from bot.modules.suggestions.cogs.suggestion_commands import SuggestionCommands
+from bot.modules.suggestions.cogs.suggestion_forum_listener import SuggestionForumListener
+from bot.modules.suggestions.views.suggestion_panel import SuggestionPanelView
 from bot.modules.seelsorge.services.seelsorge_service import SeelsorgeService
 from bot.modules.seelsorge.cogs.seelsorge_commands import SeelsorgeCommands
 from bot.modules.seelsorge.cogs.seelsorge_listener import SeelsorgeListener
@@ -105,6 +110,7 @@ class StarryBot(commands.Bot):
         self.wzs_service = WortZumSonntagService(self, self.settings, self.db, self.logger)
         self.deepseek_service = DeepSeekService(self, self.settings, self.logger)
         self.counting_service = CountingService(self, self.settings, self.db, self.logger)
+        self.suggestion_service = SuggestionService(self, self.settings, self.db, self.logger)
         self.seelsorge_service = SeelsorgeService(self, self.settings, self.db, self.logger)
         self.beichte_service = BeichteService(self, self.settings, self.db, self.logger)
         self.parlament_service = ParliamentService(self, self.settings, self.db, self.logger)
@@ -148,6 +154,9 @@ class StarryBot(commands.Bot):
         await self.add_cog(WortCommands(self))
 
         await self.add_cog(FunCommands(self))
+        await self.add_cog(PingCommands(self))
+        await self.add_cog(SuggestionForumListener(self))
+        await self.add_cog(SuggestionCommands(self))
         await self.add_cog(SeelsorgeListener(self))
         await self.add_cog(SeelsorgeCommands(self))
         await self.add_cog(BeichteListener(self))
@@ -164,6 +173,7 @@ class StarryBot(commands.Bot):
         self.add_dynamic_items(ApplicationDecisionButton)
         self.add_view(ApplicationPanelView(self.settings))
         self.add_view(SupportPanelView(self.settings))
+        self.add_view(SuggestionPanelView(self.settings))
         self.add_view(WortPanelView(self.wzs_service))
         self.add_view(WortInfoView(self.wzs_service))
         self.add_view(SeelsorgePanelView(self.seelsorge_service))

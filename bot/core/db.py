@@ -514,6 +514,35 @@ class Database:
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(guild_id, user_id)")
         await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS suggestions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            forum_channel_id INTEGER NOT NULL,
+            thread_id INTEGER NOT NULL,
+            summary_message_id INTEGER NOT NULL,
+            vote_message_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL,
+            admin_response TEXT,
+            upvotes INTEGER NOT NULL DEFAULT 0,
+            downvotes INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        if self._driver == "mysql":
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestions_guild_status ON suggestions(guild_id, status(32))")
+        else:
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestions_guild_status ON suggestions(guild_id, status)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_thread ON suggestions(guild_id, thread_id)")
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_vote_msg ON suggestions(guild_id, vote_message_id)")
+        await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS wzs_submissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
@@ -875,6 +904,135 @@ class Database:
         cur = await self._conn.execute("SELECT total_tickets FROM ticket_stats WHERE user_id = ? LIMIT 1;", (user_id,))
         row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+    async def create_suggestion(
+        self,
+        guild_id: int,
+        user_id: int,
+        forum_channel_id: int,
+        thread_id: int,
+        summary_message_id: int,
+        vote_message_id: int,
+        title: str,
+        content: str,
+    ) -> int:
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO suggestions (
+                guild_id, user_id, forum_channel_id, thread_id,
+                summary_message_id, vote_message_id, title, content,
+                status, admin_response, upvotes, downvotes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 0, 0, ?, ?);
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(forum_channel_id),
+                int(thread_id),
+                int(summary_message_id),
+                int(vote_message_id),
+                str(title),
+                str(content),
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        cur = await self._conn.execute("SELECT last_insert_rowid();")
+        row = await cur.fetchone()
+        return int(row[0] if row else 0)
+
+    async def update_suggestion_messages(self, suggestion_id: int, summary_message_id: int, vote_message_id: int):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE suggestions
+            SET summary_message_id = ?, vote_message_id = ?, updated_at = ?
+            WHERE id = ?;
+            """,
+            (int(summary_message_id), int(vote_message_id), now, int(suggestion_id)),
+        )
+        await self._conn.commit()
+
+    async def get_suggestion(self, suggestion_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, user_id, forum_channel_id, thread_id,
+                   summary_message_id, vote_message_id, title, content,
+                   status, admin_response, upvotes, downvotes, created_at, updated_at
+            FROM suggestions
+            WHERE id = ?
+            LIMIT 1;
+            """,
+            (int(suggestion_id),),
+        )
+        return await cur.fetchone()
+
+    async def get_suggestion_by_thread(self, guild_id: int, thread_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, user_id, forum_channel_id, thread_id,
+                   summary_message_id, vote_message_id, title, content,
+                   status, admin_response, upvotes, downvotes, created_at, updated_at
+            FROM suggestions
+            WHERE guild_id = ? AND thread_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(thread_id)),
+        )
+        return await cur.fetchone()
+
+    async def get_suggestion_by_vote_message(self, guild_id: int, vote_message_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, user_id, forum_channel_id, thread_id,
+                   summary_message_id, vote_message_id, title, content,
+                   status, admin_response, upvotes, downvotes, created_at, updated_at
+            FROM suggestions
+            WHERE guild_id = ? AND vote_message_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(vote_message_id)),
+        )
+        return await cur.fetchone()
+
+    async def set_suggestion_status(self, suggestion_id: int, status: str):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE suggestions
+            SET status = ?, updated_at = ?
+            WHERE id = ?;
+            """,
+            (str(status), now, int(suggestion_id)),
+        )
+        await self._conn.commit()
+
+    async def set_suggestion_admin_response(self, suggestion_id: int, response: str | None):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE suggestions
+            SET admin_response = ?, updated_at = ?
+            WHERE id = ?;
+            """,
+            (response if response is None else str(response), now, int(suggestion_id)),
+        )
+        await self._conn.commit()
+
+    async def set_suggestion_votes(self, suggestion_id: int, upvotes: int, downvotes: int):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE suggestions
+            SET upvotes = ?, downvotes = ?, updated_at = ?
+            WHERE id = ?;
+            """,
+            (int(upvotes), int(downvotes), now, int(suggestion_id)),
+        )
+        await self._conn.commit()
 
     async def upsert_user_stats(self, guild_id: int, user_id: int):
         await self._conn.execute("""
