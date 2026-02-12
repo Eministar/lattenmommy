@@ -386,12 +386,6 @@ class BirthdayService:
         }
         payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
-        if not today_entries:
-            if state_message_id:
-                await self._delete_announcement_message(guild, state_channel_id, state_message_id)
-            await self.db.clear_birthday_announcement(guild.id)
-            return True
-
         view = build_birthday_announcement_view(
             self.settings,
             guild,
@@ -402,7 +396,7 @@ class BirthdayService:
         )
         allowed = discord.AllowedMentions(users=True, roles=False, everyone=False)
 
-        if state_message_id and state_channel_id == int(channel_id) and state_date == today.isoformat():
+        if state_message_id and state_channel_id == int(channel_id):
             if state_payload == payload_json:
                 return True
             try:
@@ -419,7 +413,7 @@ class BirthdayService:
                 except Exception:
                     pass
 
-        if state_message_id and (state_channel_id != int(channel_id) or state_date != today.isoformat()):
+        if state_message_id and state_channel_id != int(channel_id):
             await self._delete_announcement_message(guild, state_channel_id, state_message_id)
 
         try:
