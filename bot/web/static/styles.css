@@ -261,6 +261,12 @@ body {
   margin-bottom: 12px;
 }
 
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .grid {
   display: grid;
   gap: 18px;
@@ -394,6 +400,48 @@ button {
 .toast.show {
   opacity: 1;
   transform: translateY(0);
+}
+
+.birthday-banner {
+  display: grid;
+  gap: 16px;
+  background: linear-gradient(135deg, rgba(248, 214, 111, 0.12), rgba(255, 143, 107, 0.12));
+}
+
+.banner-main {
+  display: grid;
+  gap: 6px;
+}
+
+.banner-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.banner-sub {
+  color: var(--muted);
+}
+
+.banner-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.banner-stat {
+  background: var(--panel-soft);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.banner-stat .label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.banner-stat .value {
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .muted {

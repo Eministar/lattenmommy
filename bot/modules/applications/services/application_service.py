@@ -201,8 +201,13 @@ class ApplicationService:
         mention = f"<@&{mention_role_id}>" if mention_role_id else ""
         title = f"Bewerbung von {interaction.user.display_name}"
 
-        created = await forum.create_thread(name=title[:100], content=mention or None, view=view)
+        created = await forum.create_thread(name=title[:100], view=view)
         thread = created.thread
+        if mention:
+            try:
+                await thread.send(content=mention)
+            except Exception:
+                pass
 
         app_id = await self.db.create_application(guild.id, interaction.user.id, thread.id, questions, answers)
         if app_id:
@@ -351,8 +356,13 @@ class _FakeInteraction:
         mention = f"<@&{mention_role_id}>" if mention_role_id else ""
         title = f"📝 Bewerbung von {interaction.user.display_name}"
 
-        created = await forum.create_thread(name=title[:100], content=mention or None, view=view)
+        created = await forum.create_thread(name=title[:100], view=view)
         thread = created.thread
+        if mention:
+            try:
+                await thread.send(content=mention)
+            except Exception:
+                pass
 
         app_id = await self.db.create_application(guild.id, interaction.user.id, thread.id, questions, answers)
         if app_id:

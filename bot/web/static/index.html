@@ -370,13 +370,73 @@
       </section>
 
       <section id="view-birthdays" class="view hidden">
-        <div class="header-row"><h2>Birthdays (Global)</h2></div>
-        <div class="card">
-          <div class="card-head">
-            <h3>Liste</h3>
+        <div class="header-row">
+          <div>
+            <h2>Birthdays</h2>
+            <p class="muted">Live-Übersicht pro Guild: Glückwünsche, nächste Termine, Booster.</p>
+          </div>
+          <div class="tools">
+            <div class="badge" id="birthdayGuildLabel">Keine Guild gewählt</div>
             <button id="birthdaysReload" class="ghost">Aktualisieren</button>
           </div>
-          <div id="birthdays" class="list"></div>
+        </div>
+
+        <div class="card birthday-banner">
+          <div class="banner-main">
+            <div class="banner-title">🎂 Birthday Live</div>
+            <div class="banner-sub">Automatische Gratulationen mit Live-Tracking.</div>
+          </div>
+          <div class="banner-stats">
+            <div class="banner-stat">
+              <div class="label">Heute</div>
+              <div class="value" id="birthdayTodayCount">–</div>
+            </div>
+            <div class="banner-stat">
+              <div class="label">Nächste</div>
+              <div class="value" id="birthdayNextCount">–</div>
+            </div>
+            <div class="banner-stat">
+              <div class="label">Booster</div>
+              <div class="value" id="birthdayBoosterCount">–</div>
+            </div>
+            <div class="banner-stat">
+              <div class="label">Gesamt</div>
+              <div class="value" id="birthdayTotalCount">–</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <div class="card">
+            <div class="card-head">
+              <h3>Heute</h3>
+              <div class="badge" id="birthdayTodayBadge">–</div>
+            </div>
+            <div id="birthdaysToday" class="list"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h3>Nächste</h3>
+              <div class="badge" id="birthdayNextBadge">–</div>
+            </div>
+            <div id="birthdaysNext" class="list"></div>
+          </div>
+        </div>
+
+        <div class="grid two">
+          <div class="card">
+            <div class="card-head">
+              <h3>Booster</h3>
+              <div class="badge" id="birthdayBoosterBadge">–</div>
+            </div>
+            <div id="boosters" class="list"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h3>Alle Geburtstage (Global)</h3>
+            </div>
+            <div id="birthdays" class="list"></div>
+          </div>
         </div>
       </section>
 

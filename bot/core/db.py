@@ -325,6 +325,38 @@ class Database:
         );
         """)
         await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS birthdays_current (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            day INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            date_value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS birthday_announcements (
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message_id INTEGER,
+            date_value TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS boosters (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            premium_since TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
+        await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS achievements (
             guild_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -1249,6 +1281,162 @@ class Database:
 
     async def count_birthdays_global(self):
         cur = await self._conn.execute("SELECT COUNT(*) FROM birthdays_global;")
+        row = await cur.fetchone()
+        return int(row[0] if row else 0)
+
+    async def list_birthdays_global_all(self):
+        cur = await self._conn.execute(
+            """
+            SELECT user_id, day, month, year
+            FROM birthdays_global
+            ORDER BY month ASC, day ASC;
+            """
+        )
+        return await cur.fetchall()
+
+    async def replace_birthdays_current(self, guild_id: int, date_value: str, rows: list[tuple[int, int, int, int]]):
+        await self._conn.execute(
+            "DELETE FROM birthdays_current WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        if rows:
+            created_at = await self.now_iso()
+            payload = [
+                (int(guild_id), int(r[0]), int(r[1]), int(r[2]), int(r[3]), str(date_value), created_at)
+                for r in rows
+            ]
+            await self._conn.executemany(
+                """
+                INSERT INTO birthdays_current (guild_id, user_id, day, month, year, date_value, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                payload,
+            )
+        await self._conn.commit()
+
+    async def list_birthdays_current(self, guild_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT user_id, day, month, year, date_value
+            FROM birthdays_current
+            WHERE guild_id = ?
+            ORDER BY month ASC, day ASC;
+            """,
+            (int(guild_id),),
+        )
+        return await cur.fetchall()
+
+    async def clear_birthdays_current(self, guild_id: int):
+        await self._conn.execute(
+            "DELETE FROM birthdays_current WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        await self._conn.commit()
+
+    async def get_birthday_announcement(self, guild_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT channel_id, message_id, date_value, payload_json, updated_at
+            FROM birthday_announcements
+            WHERE guild_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id),),
+        )
+        return await cur.fetchone()
+
+    async def set_birthday_announcement(
+        self,
+        guild_id: int,
+        channel_id: int,
+        message_id: int | None,
+        date_value: str,
+        payload_json: str,
+    ):
+        updated_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO birthday_announcements (guild_id, channel_id, message_id, date_value, payload_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                message_id = excluded.message_id,
+                date_value = excluded.date_value,
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at;
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                int(message_id) if message_id else None,
+                str(date_value),
+                str(payload_json),
+                updated_at,
+            ),
+        )
+        await self._conn.commit()
+
+    async def clear_birthday_announcement(self, guild_id: int):
+        await self._conn.execute(
+            "DELETE FROM birthday_announcements WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        await self._conn.commit()
+
+    async def replace_boosters_for_guild(self, guild_id: int, rows: list[tuple[int, int, str | None, str]]):
+        await self._conn.execute(
+            "DELETE FROM boosters WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        if rows:
+            await self._conn.executemany(
+                """
+                INSERT INTO boosters (guild_id, user_id, premium_since, updated_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                rows,
+            )
+        await self._conn.commit()
+
+    async def upsert_booster(self, guild_id: int, user_id: int, premium_since: str | None):
+        updated_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO boosters (guild_id, user_id, premium_since, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                premium_since = excluded.premium_since,
+                updated_at = excluded.updated_at;
+            """,
+            (int(guild_id), int(user_id), premium_since, updated_at),
+        )
+        await self._conn.commit()
+
+    async def remove_booster(self, guild_id: int, user_id: int):
+        await self._conn.execute(
+            "DELETE FROM boosters WHERE guild_id = ? AND user_id = ?;",
+            (int(guild_id), int(user_id)),
+        )
+        await self._conn.commit()
+
+    async def list_boosters_for_guild(self, guild_id: int, limit: int = 100, offset: int = 0):
+        cur = await self._conn.execute(
+            """
+            SELECT user_id, premium_since, updated_at
+            FROM boosters
+            WHERE guild_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?;
+            """,
+            (int(guild_id), int(limit), int(offset)),
+        )
+        return await cur.fetchall()
+
+    async def count_boosters_for_guild(self, guild_id: int):
+        cur = await self._conn.execute(
+            "SELECT COUNT(*) FROM boosters WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
         row = await cur.fetchone()
         return int(row[0] if row else 0)
 

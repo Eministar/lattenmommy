@@ -307,6 +307,11 @@ class StarryBot(commands.Bot):
                     await self.user_stats_service.ensure_roles(guild)
                 except Exception:
                     pass
+            if self.user_stats_service:
+                try:
+                    await self.user_stats_service.seed_boosters(guild)
+                except Exception:
+                    pass
             if self.birthday_service:
                 try:
                     await self.birthday_service.ensure_roles(guild)

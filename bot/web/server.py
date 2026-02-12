@@ -14,6 +14,7 @@ import uvicorn
 
 from bot.modules.tickets.services.ticket_service import TicketService
 from bot.modules.moderation.services.mod_service import ModerationService
+from bot.modules.birthdays.services.birthday_service import BirthdayService
 
 
 class WebServer:
@@ -23,6 +24,7 @@ class WebServer:
         self.bot = bot
         self.ticket_service = TicketService(bot, settings, db, getattr(bot, "logger", None))
         self.moderation_service = ModerationService(bot, settings, db, getattr(bot, "forum_logs", None))
+        self.birthday_service = getattr(bot, "birthday_service", None) or BirthdayService(bot, settings, db, getattr(bot, "logger", None))
         self.app = FastAPI()
         self._server = None
         self._task = None
@@ -231,6 +233,18 @@ class WebServer:
             total = await self.db.count_birthdays_global()
             out = [{"user_id": r[0], "day": r[1], "month": r[2], "year": r[3]} for r in rows]
             return JSONResponse({"total": total, "items": out})
+
+        @self.app.get("/api/guilds/{guild_id}/birthdays/live")
+        async def live_birthdays(request: Request, guild_id: int):
+            guild = await self._require_guild_access(request, guild_id)
+            payload = await self.birthday_service.build_dashboard_payload(guild)
+            return JSONResponse(payload)
+
+        @self.app.get("/api/guilds/{guild_id}/birthdays/summary")
+        async def guild_birthdays_summary(request: Request, guild_id: int):
+            guild = await self._require_guild_access(request, guild_id)
+            payload = await self.birthday_service.build_dashboard_payload(guild)
+            return JSONResponse(payload)
 
         @self.app.websocket("/ws/logs")
         async def ws_logs(websocket: WebSocket):

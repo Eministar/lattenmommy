@@ -433,12 +433,51 @@ class UserStatsService:
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         if not after.guild:
             return
+        if before.premium_since != after.premium_since:
+            await self.sync_booster(after)
         row = await self.db.get_user_stats(after.guild.id, after.id)
         if not row:
             return
         stats = self._row_to_stats(row)
         await self._evaluate_rules(after, stats)
         await self._check_achievements(after, stats)
+
+    async def on_member_remove(self, member: discord.Member):
+        if not member.guild:
+            return
+        await self.remove_booster(member)
+
+    async def sync_booster(self, member: discord.Member):
+        if not member.guild or member.bot:
+            return
+        if member.premium_since:
+            try:
+                since = member.premium_since.isoformat()
+            except Exception:
+                since = None
+            await self.db.upsert_booster(member.guild.id, member.id, since)
+        else:
+            await self.db.remove_booster(member.guild.id, member.id)
+
+    async def remove_booster(self, member: discord.Member):
+        if not member.guild or member.bot:
+            return
+        await self.db.remove_booster(member.guild.id, member.id)
+
+    async def seed_boosters(self, guild: discord.Guild):
+        if not guild:
+            return
+        updated_at = await self.db.now_iso()
+        rows = []
+        for member in guild.members:
+            if member.bot or not member.premium_since:
+                continue
+            try:
+                since = member.premium_since.isoformat()
+            except Exception:
+                since = None
+            rows.append((int(guild.id), int(member.id), since, updated_at))
+        await self.db.replace_boosters_for_guild(guild.id, rows)
 
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         if not member.guild or member.bot:

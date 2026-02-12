@@ -24,9 +24,29 @@ class UserStatsListener(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        if not self.bot.settings.get_guild_bool(after.guild.id, "user_stats.enabled", True):
+        enabled = self.bot.settings.get_guild_bool(after.guild.id, "user_stats.enabled", True)
+        if not enabled:
+            try:
+                if before.premium_since != after.premium_since:
+                    await self.service.sync_booster(after)
+            except Exception:
+                pass
             return
         await self.service.on_member_update(before, after)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        try:
+            await self.service.sync_booster(member)
+        except Exception:
+            pass
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        try:
+            await self.service.on_member_remove(member)
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):

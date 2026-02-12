@@ -78,6 +78,10 @@ function selectGuild(guildId) {
   renderGuilds();
   const guild = state.guilds.find((g) => g.id === guildId);
   $("selectedGuildLabel").textContent = guild ? `Guild: ${guild.name}` : "Keine Guild gewählt";
+  const birthdayLabel = $("birthdayGuildLabel");
+  if (birthdayLabel) {
+    birthdayLabel.textContent = guild ? `Guild: ${guild.name}` : "Keine Guild gewählt";
+  }
   refreshGuildData().catch((e) => toast(e.message));
 }
 
@@ -145,6 +149,13 @@ function renderTickets(list) {
 }
 
 let ticketCache = [];
+
+function formatDate(value) {
+  if (!value) return "–";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("de-DE");
+}
 
 async function loadGlobalSummary() {
   const data = await api("/api/global/summary");
@@ -313,6 +324,66 @@ async function loadBirthdays() {
   }
 }
 
+async function loadBirthdaySummary() {
+  const gid = requireGuild();
+  const data = await api(`/api/guilds/${gid}/birthdays/summary`);
+
+  $("birthdayTodayCount").textContent = data.total_today ?? 0;
+  $("birthdayNextCount").textContent = data.total_next ?? 0;
+  $("birthdayBoosterCount").textContent = data.total_boosters ?? 0;
+  $("birthdayTotalCount").textContent = data.total_birthdays ?? 0;
+
+  $("birthdayTodayBadge").textContent = data.date ? formatDate(data.date) : (data.total_today ?? 0);
+  $("birthdayNextBadge").textContent = data.total_next ?? 0;
+  $("birthdayBoosterBadge").textContent = data.total_boosters ?? 0;
+
+  const todayRoot = $("birthdaysToday");
+  todayRoot.innerHTML = "";
+  const today = data.today || [];
+  if (!today.length) {
+    todayRoot.innerHTML = '<div class="list-item">Heute hat niemand Geburtstag.</div>';
+  } else {
+    for (const row of today) {
+      const div = document.createElement("div");
+      div.className = "list-item";
+      const ageLine = row.age ? `wird ${row.age}` : "—";
+      div.innerHTML = `<strong>${row.display_name}</strong> · <code>${row.user_id}</code><br><small>${ageLine}</small>`;
+      todayRoot.appendChild(div);
+    }
+  }
+
+  const nextRoot = $("birthdaysNext");
+  nextRoot.innerHTML = "";
+  const next = data.next || [];
+  if (!next.length) {
+    nextRoot.innerHTML = '<div class="list-item">Keine anstehenden Termine.</div>';
+  } else {
+    for (const row of next) {
+      const div = document.createElement("div");
+      div.className = "list-item";
+      const dateLine = `${row.day}.${row.month} · in ${row.days_until} Tagen`;
+      const turns = row.turns ? ` · wird ${row.turns}` : "";
+      div.innerHTML = `<strong>${row.display_name}</strong> · <code>${row.user_id}</code><br><small>${dateLine}${turns}</small>`;
+      nextRoot.appendChild(div);
+    }
+  }
+
+  const boostersRoot = $("boosters");
+  boostersRoot.innerHTML = "";
+  const boosters = data.boosters || [];
+  if (!boosters.length) {
+    boostersRoot.innerHTML = '<div class="list-item">Keine Booster gespeichert.</div>';
+  } else {
+    for (const row of boosters) {
+      const div = document.createElement("div");
+      div.className = "list-item";
+      const since = formatDate(row.premium_since);
+      div.innerHTML = `<strong>${row.display_name}</strong> · <code>${row.user_id}</code><br><small>seit ${since}</small>`;
+      boostersRoot.appendChild(div);
+    }
+  }
+}
+
 async function postJson(path, payload) {
   return api(path, { method: "POST", body: JSON.stringify(payload) });
 }
@@ -323,6 +394,7 @@ async function refreshGuildData() {
     loadTickets(),
     loadApplications(),
     loadApplicationsList(),
+    loadBirthdaySummary(),
   ]);
 }
 
@@ -349,7 +421,13 @@ async function init() {
 
 // Navigation
 Array.from(document.querySelectorAll(".nav-btn")).forEach((btn) => {
-  btn.addEventListener("click", () => setView(btn.dataset.view));
+  btn.addEventListener("click", () => {
+    setView(btn.dataset.view);
+    if (btn.dataset.view === "birthdays") {
+      loadBirthdays().catch((e) => toast(e.message));
+      loadBirthdaySummary().catch(() => null);
+    }
+  });
 });
 
 // Auth
@@ -483,6 +561,9 @@ $("prettify").onclick = () => {
 };
 
 // Birthdays
-$("birthdaysReload").onclick = () => loadBirthdays().then(() => toast("Birthdays geladen")).catch((e) => toast(e.message));
+$("birthdaysReload").onclick = () => Promise.all([
+  loadBirthdays(),
+  loadBirthdaySummary().catch(() => null),
+]).then(() => toast("Birthdays geladen")).catch((e) => toast(e.message));
 
 init();

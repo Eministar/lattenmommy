@@ -213,7 +213,7 @@ class TempVoiceService:
         container = build_tempvoice_panel_container(self.settings, guild, owner, channel, locked, private)
         view = TempVoicePanelView(self, channel.id, owner.id, locked, private, container=container)
         try:
-            return await ch.send(content=f"{owner.mention} {self._panel_mention()}", view=view)
+            return await ch.send(view=view)
         except Exception:
             return None
 
@@ -246,12 +246,12 @@ class TempVoiceService:
         if panel_msg_id:
             try:
                 msg = await panel_ch.fetch_message(int(panel_msg_id))
-                await msg.edit(content=f"{owner.mention} {self._panel_mention()}", view=view)
+                await msg.edit(view=view)
                 return
             except Exception:
                 pass
         try:
-            msg = await panel_ch.send(content=f"{owner.mention} {self._panel_mention()}", view=view)
+            msg = await panel_ch.send(view=view)
             await self.db.set_tempvoice_panel_message(guild.id, ch.id, panel_ch.id, msg.id)
         except Exception:
             pass

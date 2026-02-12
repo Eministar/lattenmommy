@@ -762,7 +762,6 @@ class TicketService:
             created = await forum.create_thread(
                 name=_truncate(thread_name, 100),
                 content=content_head,
-                view=view,
                 applied_tags=applied_tags,
             )
         except Exception as e:
@@ -779,19 +778,24 @@ class TicketService:
         thread = created.thread
         msg = created.message
 
+        try:
+            summary_msg = await thread.send(view=view)
+        except Exception:
+            summary_msg = msg
+
         ticket_id = await self.db.create_ticket(
             guild_id=guild.id,
             user_id=user.id,
             forum_channel_id=forum.id,
             thread_id=thread.id,
-            summary_message_id=msg.id,
+            summary_message_id=summary_msg.id,
             category_key=category_key,
         )
         await self.db.add_ticket_participant(int(ticket_id), int(user.id), added_by=None)
 
         view.ticket_id = int(ticket_id)
         try:
-            await msg.edit(view=view)
+            await summary_msg.edit(view=view)
         except Exception:
             pass
 
