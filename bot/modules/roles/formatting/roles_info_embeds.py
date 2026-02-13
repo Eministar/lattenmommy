@@ -37,7 +37,11 @@ def _add_banner(container: discord.ui.Container, banner_url: str | None):
 
 
 def _to_role_ids(raw) -> list[int]:
-    if not isinstance(raw, list):
+    if isinstance(raw, (tuple, set)):
+        raw = list(raw)
+    elif isinstance(raw, str):
+        raw = [p.strip() for p in raw.split(",") if p.strip()]
+    elif not isinstance(raw, list):
         return []
     out: list[int] = []
     for item in raw:
@@ -53,6 +57,17 @@ def _to_role_ids(raw) -> list[int]:
 
 def _non_bot_count(role: discord.Role) -> int:
     return sum(1 for m in role.members if not getattr(m, "bot", False))
+
+
+def _role_ids_with_fallback(settings, guild: discord.Guild, key: str) -> list[int]:
+    raw = settings.get_guild(guild.id, key, None)
+    if raw in (None, "", [], {}):
+        raw = settings.get(key, [])
+    return _to_role_ids(raw)
+
+
+def _non_bot_members(role: discord.Role) -> list[discord.Member]:
+    return [m for m in role.members if not getattr(m, "bot", False)]
 
 
 def _boxed(lines: list[str], empty: str) -> str:
@@ -110,7 +125,7 @@ def _roles_for_category(settings, guild: discord.Guild, category: str) -> tuple[
         )
 
     if cat == "team":
-        role_ids = _to_role_ids(settings.get_guild(guild.id, "roles.team_role_ids", []) or [])
+        role_ids = _role_ids_with_fallback(settings, guild, "roles.team_role_ids")
         roles = [r for rid in role_ids if (r := guild.get_role(int(rid)))]
         return (
             "Teamrollen",
@@ -119,7 +134,7 @@ def _roles_for_category(settings, guild: discord.Guild, category: str) -> tuple[
             roles,
         )
 
-    role_ids = _to_role_ids(settings.get_guild(guild.id, "roles.special_role_ids", []) or [])
+    role_ids = _role_ids_with_fallback(settings, guild, "roles.special_role_ids")
     roles = [r for rid in role_ids if (r := guild.get_role(int(rid)))]
     return (
         "Sonderrollen",
@@ -151,16 +166,31 @@ def build_roles_info_panel_container(settings, guild: discord.Guild, select: dis
 
 
 def build_roles_category_view(settings, guild: discord.Guild, category: str) -> discord.ui.LayoutView:
-    label, header, banner, roles = _roles_for_category(settings, guild, category)
+    cat = str(category or "").lower()
+    show_members = cat in {"team", "special"}
+    label, header, banner, roles = _roles_for_category(settings, guild, cat)
     lines = []
     total_members = 0
     for role in roles:
-        cnt = _non_bot_count(role)
+        members = _non_bot_members(role)
+        cnt = len(members)
         total_members += cnt
         icon = "🟢" if cnt > 0 else "⚪"
         lines.append(f"{icon} {role.mention} 𑁉 Besitzer: `x{cnt}`")
+        if show_members:
+            if not members:
+                lines.append("`┗👤` Mitglieder: `keine`")
+            else:
+                shown = members[:12]
+                mention_text = ", ".join(m.mention for m in shown)
+                rest = len(members) - len(shown)
+                suffix = f" +`{rest}` weitere" if rest > 0 else ""
+                lines.append(f"`┗👤` Mitglieder: {mention_text}{suffix}")
 
-    roles_block = _boxed(lines, "Keine Rollen konfiguriert.")
+    empty_text = "Keine Rollen konfiguriert."
+    if show_members:
+        empty_text = "Keine Rollen gefunden. Prüfe `roles.team_role_ids` / `roles.special_role_ids` und ob die IDs zu diesem Server gehören."
+    roles_block = _boxed(lines, empty_text)
     avg_members = round((total_members / len(roles)), 1) if roles else 0
     stats_block = (
         f"┏`📦` - Rollen in Kategorie: **{len(roles)}**\n"
@@ -173,8 +203,7 @@ def build_roles_category_view(settings, guild: discord.Guild, category: str) -> 
     container.add_item(
         discord.ui.TextDisplay(
             f"**{header}**\n"
-            f"`📚` Kategorie: **{label}**\n"
-            f"`🫧` Ansicht: Nur für dich sichtbar"
+            f"`📚` Kategorie: **{label}**"
         )
     )
     container.add_item(discord.ui.Separator())
