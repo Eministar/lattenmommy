@@ -157,23 +157,31 @@ def build_roles_category_view(settings, guild: discord.Guild, category: str) -> 
     for role in roles:
         cnt = _non_bot_count(role)
         total_members += cnt
-        lines.append(f"{role.mention} ({role.id}) - Hat: **{cnt}**")
+        icon = "🟢" if cnt > 0 else "⚪"
+        lines.append(f"{icon} {role.mention} 𑁉 Besitzer: `x{cnt}`")
 
     roles_block = _boxed(lines, "Keine Rollen konfiguriert.")
+    avg_members = round((total_members / len(roles)), 1) if roles else 0
     stats_block = (
         f"┏`📦` - Rollen in Kategorie: **{len(roles)}**\n"
-        f"┗`👥` - Summierte Besitzer: **{total_members}**"
+        f"┣`👥` - Summierte Besitzer: **{total_members}**\n"
+        f"┗`📈` - Ø Besitzer pro Rolle: **{avg_members}**"
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
     _add_banner(container, banner)
-    container.add_item(discord.ui.TextDisplay(f"**{header}**\nKategorie: **{label}**"))
+    container.add_item(
+        discord.ui.TextDisplay(
+            f"**{header}**\n"
+            f"`📚` Kategorie: **{label}**\n"
+            f"`🫧` Ansicht: Nur für dich sichtbar"
+        )
+    )
     container.add_item(discord.ui.Separator())
-    container.add_item(discord.ui.TextDisplay(f"**Rollen**\n{roles_block}"))
+    container.add_item(discord.ui.TextDisplay(f"**`🎭` Rollenübersicht**\n{roles_block}"))
     container.add_item(discord.ui.Separator())
-    container.add_item(discord.ui.TextDisplay(f"**Live-Stats**\n{stats_block}"))
+    container.add_item(discord.ui.TextDisplay(f"**`📊` Live-Stats**\n{stats_block}"))
 
     view = discord.ui.LayoutView(timeout=None)
     view.add_item(container)
     return view
-

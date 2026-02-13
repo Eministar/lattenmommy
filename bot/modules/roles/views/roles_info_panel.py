@@ -31,11 +31,7 @@ class RolesInfoCategorySelect(discord.ui.Select):
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
         category = str(self.values[0])
         view = build_roles_category_view(self.settings, interaction.guild, category)
-        target = interaction.channel
-        if not isinstance(target, discord.abc.Messageable):
-            return await interaction.response.send_message("Kanal ungültig.", ephemeral=True)
-        await target.send(view=view)
-        await interaction.response.send_message("Rollen-Info gesendet.", ephemeral=True)
+        await interaction.response.send_message(view=view, ephemeral=True)
 
 
 class RolesInfoPanelView(discord.ui.LayoutView):
@@ -44,4 +40,3 @@ class RolesInfoPanelView(discord.ui.LayoutView):
         select = RolesInfoCategorySelect(settings, guild)
         container = build_roles_info_panel_container(settings, guild, select)
         self.add_item(container)
-
