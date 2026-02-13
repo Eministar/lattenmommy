@@ -92,6 +92,10 @@ def _non_bot_members(role: discord.Role) -> list[discord.Member]:
     return [m for m in role.members if not getattr(m, "bot", False)]
 
 
+def _chunk(seq: list[str], size: int) -> list[list[str]]:
+    return [seq[i:i + size] for i in range(0, len(seq), size)]
+
+
 def _boxed(lines: list[str], empty: str) -> str:
     if not lines:
         return f"┗{empty}"
@@ -204,10 +208,13 @@ def build_roles_category_view(settings, guild: discord.Guild, category: str) -> 
                 lines.append("`┗👤` Mitglieder: `keine`")
             else:
                 shown = members[:12]
-                mention_text = ", ".join(m.mention for m in shown)
+                mention_list = [m.mention for m in shown]
                 rest = len(members) - len(shown)
-                suffix = f" +`{rest}` weitere" if rest > 0 else ""
-                lines.append(f"`┗👤` Mitglieder: {mention_text}{suffix}")
+                lines.append(f"`┗👤` Mitglieder (`{cnt}`):")
+                for grp in _chunk(mention_list, 3):
+                    lines.append("`   ` " + "  •  ".join(grp))
+                if rest > 0:
+                    lines.append(f"`   ` +`{rest}` weitere")
 
     empty_text = "Keine Rollen konfiguriert."
     if show_members:
