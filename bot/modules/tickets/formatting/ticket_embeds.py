@@ -401,9 +401,9 @@ def build_support_panel_container(
     )
     stats_block = (
         f"┏`📦` - Tickets gesamt: **{total}**\n"
-        f"┣`{orange}` - Offen: **{open_}**\n"
-        f"┣`{green}` - Aktiv (24h): **{active}**\n"
-        f"┗`{red}` - Geschlossen: **{max(0, int(total) - int(open_))}**"
+        f"┣{orange} - Offen: **{open_}**\n"
+        f"┣{green} - Aktiv (24h): **{active}**\n"
+        f"┗{red} - Geschlossen: **{max(0, int(total) - int(open_))}**"
     )
     note_block = (
         f"{info} **Hinweis**\n"

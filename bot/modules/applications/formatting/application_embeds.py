@@ -193,8 +193,8 @@ def build_application_panel_container(
     )
     stats_block = (
         f"┏`📦` - Bewerbungen gesamt: **{total}**\n"
-        f"┣`{orange}` - Offen: **{open_}**\n"
-        f"┗`{green}` - Bearbeitet: **{max(0, int(total) - int(open_))}**"
+        f"┣{orange} - Offen: **{open_}**\n"
+        f"┗{green} - Bearbeitet: **{max(0, int(total) - int(open_))}**"
     )
     note_block = (
         f"{info} **Hinweis**\n"
