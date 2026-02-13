@@ -59,20 +59,33 @@ def _non_bot_count(role: discord.Role) -> int:
     return sum(1 for m in role.members if not getattr(m, "bot", False))
 
 
-def _role_ids_with_fallback(settings, guild: discord.Guild, key: str) -> list[int]:
-    raw = settings.get_guild(guild.id, key, None)
-    if raw in (None, "", [], {}):
+def _raw_from_base(settings, dotted: str):
+    node = getattr(settings, "_base", {}) or {}
+    for part in str(dotted).split("."):
+        if not isinstance(node, dict) or part not in node:
+            return []
+        node = node[part]
+    return node
+
+
+def _role_ids_with_fallback(settings, guild: discord.Guild, keys: list[str]) -> list[int]:
+    for key in keys:
+        raw = settings.get_guild(guild.id, key, None)
+        if raw not in (None, "", [], {}):
+            ids = _to_role_ids(raw)
+            if ids:
+                return ids
         raw = settings.get(key, [])
-    if raw in (None, "", [], {}):
-        # Letzter Fallback: rohe Basis-Config (config.yml), falls Overrides leere Werte gesetzt haben.
-        node = getattr(settings, "_base", {}) or {}
-        for part in str(key).split("."):
-            if not isinstance(node, dict) or part not in node:
-                node = []
-                break
-            node = node[part]
-        raw = node
-    return _to_role_ids(raw)
+        if raw not in (None, "", [], {}):
+            ids = _to_role_ids(raw)
+            if ids:
+                return ids
+        raw = _raw_from_base(settings, key)
+        if raw not in (None, "", [], {}):
+            ids = _to_role_ids(raw)
+            if ids:
+                return ids
+    return []
 
 
 def _non_bot_members(role: discord.Role) -> list[discord.Member]:
@@ -134,7 +147,7 @@ def _roles_for_category(settings, guild: discord.Guild, category: str) -> tuple[
         )
 
     if cat == "team":
-        role_ids = _role_ids_with_fallback(settings, guild, "roles.team_role_ids")
+        role_ids = _role_ids_with_fallback(settings, guild, ["role-info.team_role_ids", "roles.team_role_ids"])
         roles = [r for rid in role_ids if (r := guild.get_role(int(rid)))]
         return (
             "Teamrollen",
@@ -143,7 +156,7 @@ def _roles_for_category(settings, guild: discord.Guild, category: str) -> tuple[
             roles,
         )
 
-    role_ids = _role_ids_with_fallback(settings, guild, "roles.special_role_ids")
+    role_ids = _role_ids_with_fallback(settings, guild, ["role-info.special_role_ids", "roles.special_role_ids"])
     roles = [r for rid in role_ids if (r := guild.get_role(int(rid)))]
     return (
         "Sonderrollen",
@@ -198,7 +211,7 @@ def build_roles_category_view(settings, guild: discord.Guild, category: str) -> 
 
     empty_text = "Keine Rollen konfiguriert."
     if show_members:
-        empty_text = "Keine Rollen gefunden. Prüfe `roles.team_role_ids` / `roles.special_role_ids` und ob die IDs zu diesem Server gehören."
+        empty_text = "Keine Rollen gefunden. Prüfe `role-info.team_role_ids` / `role-info.special_role_ids` und ob die IDs zu diesem Server gehören."
     roles_block = _boxed(lines, empty_text)
     avg_members = round((total_members / len(roles)), 1) if roles else 0
     stats_block = (

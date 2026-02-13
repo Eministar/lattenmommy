@@ -14,6 +14,54 @@ class RolesCommands(commands.Cog):
     roll = app_commands.Group(name="roll", description="🧩 𑁉 Rollen-Bereich")
     roll_info = app_commands.Group(name="roll-info", description="ℹ️ 𑁉 Rollen-Infos", parent=roll)
 
+    @staticmethod
+    def _to_role_ids(raw) -> list[int]:
+        if isinstance(raw, (tuple, set)):
+            raw = list(raw)
+        elif isinstance(raw, str):
+            raw = [p.strip() for p in raw.split(",") if p.strip()]
+        elif not isinstance(raw, list):
+            return []
+        out: list[int] = []
+        for item in raw:
+            try:
+                if isinstance(item, dict):
+                    out.append(int(item.get("role_id", 0) or 0))
+                else:
+                    out.append(int(item))
+            except Exception:
+                continue
+        return [int(v) for v in out if int(v) > 0]
+
+    @staticmethod
+    def _raw_from_base(settings, dotted: str):
+        node = getattr(settings, "_base", {}) or {}
+        for part in str(dotted).split("."):
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return node
+
+    def _resolve_role_info_ids(self, guild_id: int, category: str) -> tuple[str, list[int]]:
+        settings = self.bot.settings
+        key_new = f"role-info.{category}_role_ids"
+        key_old = f"roles.{category}_role_ids"
+        keys = [key_new, key_old]
+        for key in keys:
+            raw = settings.get_guild(guild_id, key, None)
+            ids = self._to_role_ids(raw)
+            if ids:
+                return f"guild:{key}", ids
+            raw = settings.get(key, None)
+            ids = self._to_role_ids(raw)
+            if ids:
+                return f"global:{key}", ids
+            raw = self._raw_from_base(settings, key)
+            ids = self._to_role_ids(raw)
+            if ids:
+                return f"base:{key}", ids
+        return "none", []
+
     @roles.command(name="sync", description="🔄 𑁉 Auto-Rollen syncen")
     async def sync(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -89,3 +137,39 @@ class RolesCommands(commands.Cog):
             return await interaction.response.send_message("Zielkanal ungültig.", ephemeral=True)
         await target.send(view=RolesInfoPanelView(self.bot.settings, interaction.guild))
         await interaction.response.send_message("Rollen-Info Panel gesendet.", ephemeral=True)
+
+    @roll_info.command(name="debug", description="🧪 𑁉 Zeigt geladene Role-Info IDs + Treffer")
+    async def roll_info_debug(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        if not is_staff(self.bot.settings, interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+
+        guild = interaction.guild
+        team_source, team_ids = self._resolve_role_info_ids(guild.id, "team")
+        special_source, special_ids = self._resolve_role_info_ids(guild.id, "special")
+
+        def _block(name: str, source: str, ids: list[int]) -> str:
+            found = [rid for rid in ids if guild.get_role(int(rid))]
+            missing = [rid for rid in ids if not guild.get_role(int(rid))]
+            lines = [
+                f"`Quelle`: `{source}`",
+                f"`IDs`: **{len(ids)}** | `gefunden`: **{len(found)}** | `fehlend`: **{len(missing)}**",
+            ]
+            if found:
+                lines.append("`Gefunden`: " + ", ".join(f"<@&{rid}>" for rid in found[:10]))
+            if missing:
+                lines.append("`Fehlend`: " + ", ".join(f"`{rid}`" for rid in missing[:10]))
+            if len(found) > 10:
+                lines.append(f"`…` +{len(found) - 10} weitere gefundene")
+            if len(missing) > 10:
+                lines.append(f"`…` +{len(missing) - 10} weitere fehlende")
+            return f"**{name}**\n" + "\n".join(lines)
+
+        text = (
+            f"**🧪 𑁉 ROLE-INFO DEBUG**\n"
+            f"`Guild`: `{guild.name}` (`{guild.id}`)\n\n"
+            f"{_block('🛡️ Team', team_source, team_ids)}\n\n"
+            f"{_block('✨ Sonder', special_source, special_ids)}"
+        )
+        await interaction.response.send_message(text, ephemeral=True)
