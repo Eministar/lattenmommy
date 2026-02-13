@@ -164,6 +164,32 @@ class BirthdayService:
         except Exception:
             pass
 
+    async def handle_member_join(self, member: discord.Member):
+        guild = member.guild
+        if not guild or member.bot:
+            return
+        try:
+            await self.announce_today(guild)
+        except Exception:
+            pass
+
+    async def handle_member_remove(self, member: discord.Member):
+        guild = member.guild
+        if not guild or member.bot:
+            return
+        try:
+            await self.db.remove_birthday(int(guild.id), int(member.id))
+        except Exception:
+            pass
+        try:
+            await self.db.remove_birthday_global(int(member.id))
+        except Exception:
+            pass
+        try:
+            await self.announce_today(guild)
+        except Exception:
+            pass
+
     async def _apply_age_roles(self, member: discord.Member, year: int):
         now = datetime.now(self._tz(member.guild.id))
         age = now.year - int(year)
@@ -368,8 +394,10 @@ class BirthdayService:
         current_rows = [(e["user_id"], e["day"], e["month"], e["year"]) for e in today_entries]
         await self.db.replace_birthdays_current(guild.id, today.isoformat(), current_rows)
 
-        next_limit = int(self.settings.get_guild(guild.id, "birthday.next_limit", 6) or 6)
-        next_entries = self._build_next_entries(all_entries, today, next_limit)
+        all_entries_sorted = sorted(
+            all_entries,
+            key=lambda e: (int(e.get("month") or 0), int(e.get("day") or 0), int(e.get("user_id") or 0)),
+        )
         total_birthdays = len(all_entries)
 
         payload = {
@@ -378,9 +406,9 @@ class BirthdayService:
                 {"user_id": int(e["user_id"]), "day": int(e["day"]), "month": int(e["month"]), "year": int(e["year"])}
                 for e in today_entries
             ],
-            "next": [
+            "all": [
                 {"user_id": int(e["user_id"]), "day": int(e["day"]), "month": int(e["month"]), "year": int(e["year"])}
-                for e in next_entries
+                for e in all_entries_sorted
             ],
             "total": int(total_birthdays),
         }
@@ -391,7 +419,7 @@ class BirthdayService:
             guild,
             self._embed_color(None, guild=guild),
             today_entries,
-            next_entries,
+            all_entries_sorted,
             total_birthdays,
         )
         allowed = discord.AllowedMentions(users=True, roles=False, everyone=False)
@@ -519,17 +547,28 @@ class BirthdayService:
         )
 
     async def build_birthday_list_embed(self, guild: discord.Guild, page: int = 1, per_page: int = 10):
-        total = await self.db.count_birthdays_global()
+        rows = await self.db.list_birthdays_global_all()
+        now = datetime.now(self._tz(guild.id))
+        _, all_entries = self._collect_guild_birthdays(guild, rows, now)
+        all_entries = sorted(
+            all_entries,
+            key=lambda e: (int(e.get("month") or 0), int(e.get("day") or 0), int(e.get("user_id") or 0)),
+        )
+
+        total = len(all_entries)
         total_pages = max(1, (total + per_page - 1) // per_page)
         page = max(1, min(page, total_pages))
         offset = (page - 1) * per_page
-        rows = await self.db.list_birthdays_global(limit=per_page, offset=offset)
+        page_entries = all_entries[offset : offset + per_page]
 
         lines = []
-        for row in rows:
-            uid, day, month, year = int(row[0]), int(row[1]), int(row[2]), int(row[3])
-            member = guild.get_member(uid)
-            name = member.mention if member else f"<@{uid}>"
+        for entry in page_entries:
+            uid = int(entry["user_id"])
+            day = int(entry["day"])
+            month = int(entry["month"])
+            year = int(entry["year"])
+            member = entry.get("member")
+            name = member.mention if member else str(uid)
             month_name = calendar.month_name[month]
             lines.append(f"• {name} — **{day}. {month_name} {year}**")
         text = "\n".join(lines) if lines else "Keine Geburtstage gespeichert."

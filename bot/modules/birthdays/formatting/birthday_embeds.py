@@ -39,7 +39,7 @@ def build_birthday_announcement_view(
     guild: discord.Guild | None,
     accent_color: int,
     today_entries: list[dict],
-    next_entries: list[dict],
+    all_entries: list[dict],
     total_birthdays: int | None = None,
 ):
     cake = em(settings, "cake", guild) or "🎂"
@@ -65,24 +65,20 @@ def build_birthday_announcement_view(
 
     today_block = _boxed_lines(today_lines, "🎈 - Heute hat niemand Geburtstag.")
 
-    next_lines: list[str] = []
-    for entry in next_entries:
+    all_lines: list[str] = []
+    for entry in all_entries:
         member = entry.get("member")
         user_id = int(entry.get("user_id") or 0)
         mention = member.mention if member else f"<@{user_id}>"
         day = int(entry.get("day") or 0)
         month = int(entry.get("month") or 0)
-        days_until = int(entry.get("days_until") or 0)
-        turns = entry.get("turns")
+        year = int(entry.get("year") or 0)
         month_name = calendar.month_name[month] if month else "?"
         when = f"{day}. {month_name}"
-        if turns is not None:
-            line = f"{calendar_emoji} - {mention} · {when} · in **{days_until}** Tagen (wird **{int(turns)}**)"
-        else:
-            line = f"{calendar_emoji} - {mention} · {when} · in **{days_until}** Tagen"
-        next_lines.append(line)
+        line = f"{calendar_emoji} - {mention} · {when} {year}"
+        all_lines.append(line)
 
-    next_block = _boxed_lines(next_lines, "📭 - Keine Termine gespeichert.")
+    all_block = _boxed_lines(all_lines, "📭 - Keine Termine gespeichert.")
 
     stats_block = None
     if total_birthdays is not None:
@@ -94,7 +90,7 @@ def build_birthday_announcement_view(
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(f"**Heute**\n{today_block}"))
     container.add_item(discord.ui.Separator())
-    container.add_item(discord.ui.TextDisplay(f"**Nächste Geburtstage**\n{next_block}"))
+    container.add_item(discord.ui.TextDisplay(f"**Alle Geburtstage**\n{all_block}"))
     if stats_block:
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(stats_block))

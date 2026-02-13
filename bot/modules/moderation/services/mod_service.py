@@ -10,6 +10,8 @@ from bot.modules.moderation.formatting.moderation_embeds import (
     build_kick_embed,
     build_ban_embed,
     build_purge_embed,
+    build_unwarn_embed,
+    build_case_reason_updated_embed,
 )
 
 
@@ -170,3 +172,27 @@ class ModerationService:
     async def add_note(self, guild: discord.Guild, moderator: discord.Member, target: discord.Member, note: str):
         case_id = await self.db.add_infraction(guild.id, target.id, moderator.id, "note", None, note)
         return case_id
+
+    async def unwarn(self, guild: discord.Guild, moderator: discord.Member, target: discord.Member, amount: int = 1):
+        removed = await self.db.delete_recent_infractions(guild.id, target.id, ["warn", "timeout"], limit=max(1, int(amount)))
+        if self.forum_logs:
+            emb = build_unwarn_embed(self.settings, guild, moderator, target, removed)
+            await self.forum_logs.emit(guild, "punishments", emb)
+        return int(removed)
+
+    async def clear_notes(self, guild: discord.Guild, moderator: discord.Member, target: discord.Member, amount: int = 10):
+        removed = await self.db.delete_recent_infractions(guild.id, target.id, ["note"], limit=max(1, int(amount)))
+        return int(removed)
+
+    async def update_case_reason(self, guild: discord.Guild, moderator: discord.Member, case_id: int, reason: str | None):
+        row = await self.db.get_infraction(guild.id, int(case_id))
+        if not row:
+            return False, "case_not_found"
+        user_id = int(row[6])
+        ok = await self.db.update_infraction_reason(guild.id, int(case_id), reason)
+        if not ok:
+            return False, "update_failed"
+        if self.forum_logs:
+            emb = build_case_reason_updated_embed(self.settings, guild, moderator, int(case_id), user_id, reason)
+            await self.forum_logs.emit(guild, "punishments", emb)
+        return True, None

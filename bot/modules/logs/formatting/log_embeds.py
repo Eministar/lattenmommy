@@ -148,8 +148,9 @@ def build_join_embed(settings, guild: discord.Guild, member: discord.Member):
 
 def build_leave_embed(settings, guild: discord.Guild, user: discord.User):
     red = em(settings, "red", guild) or "🟥"
+    display_name = discord.utils.escape_markdown(getattr(user, "display_name", None) or user.name or str(user.id))
     desc = (
-        f"┏`👤` - User: <@{user.id}> ({user.id})\n"
+        f"┏`👤` - User: **{display_name}** ({user.id})\n"
         f"┗`🌈` - Account erstellt: {format_dt(user.created_at, style='R')}"
     )
     emb = discord.Embed(title=f"{red} 𑁉 LEAVE", description=desc, color=_color(settings, guild))

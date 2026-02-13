@@ -179,19 +179,26 @@ def build_application_panel_container(
     pen = em(settings, "pen", guild) or "📝"
     sparkles = em(settings, "sparkles", guild) or "✨"
     info = em(settings, "info", guild) or "ℹ️"
+    green = em(settings, "green", guild) or "🟢"
+    orange = em(settings, "orange", guild) or "🟠"
 
     header = f"**{pen} 𑁉 BEWERBUNGS-PANEL**"
     intro = f"{arrow2} Du willst Teil des Teams werden? Starte deine Bewerbung direkt hier."
-    cta = f"{sparkles} **Jetzt bewerben** – kurz, strukturiert und im Design eures Servers."
+    cta = f"{sparkles} **Bewerbung starten** und die Fragen sauber beantworten."
     flow = (
-        "1) Button klicken\n"
-        "2) Fragen beantworten\n"
-        "3) Wir prüfen die Bewerbung\n"
-        "4) Rückmeldung im Thread"
+        "┏`🖱️` - Button klicken\n"
+        "┣`🧾` - Fragen ausfüllen\n"
+        "┣`🔎` - Team prüft deine Antworten\n"
+        "┗`📬` - Entscheidung im Bewerbungs-Thread"
     )
     stats_block = (
-        f"Bewerbungen gesamt: **{total}**\n"
-        f"Offen: **{open_}**"
+        f"┏`📦` - Bewerbungen gesamt: **{total}**\n"
+        f"┣`{orange}` - Offen: **{open_}**\n"
+        f"┗`{green}` - Bearbeitet: **{max(0, int(total) - int(open_))}**"
+    )
+    note_block = (
+        f"{info} **Hinweis**\n"
+        "Unvollständige oder leere Antworten verzögern die Prüfung."
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
@@ -201,6 +208,9 @@ def build_application_panel_container(
     container.add_item(discord.ui.TextDisplay(f"**Ablauf**\n{flow}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(f"**{info} Live-Stats**\n{stats_block}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(note_block))
+    container.add_item(discord.ui.Separator())
     row = discord.ui.ActionRow()
     row.add_item(button)
     container.add_item(row)

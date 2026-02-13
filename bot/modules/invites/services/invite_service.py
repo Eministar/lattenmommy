@@ -44,6 +44,7 @@ class InviteService:
         member: discord.Member,
         inviter_id: int,
         invite_code: str,
+        invite_uses: int | None = None,
     ):
         ch = await self._get_channel(guild, self._log_channel_id(guild.id))
         if not ch:
@@ -60,12 +61,35 @@ class InviteService:
         inviter = guild.get_member(int(inviter_id)) if inviter_id else None
         inviter_line = inviter.mention if inviter else ("Vanity" if invite_code == "vanity" else "Unbekannt")
         code_line = invite_code if invite_code else "—"
+        invite_uses_line = str(int(invite_uses)) if invite_uses is not None else "—"
+        inviter_count = "—"
+        inviter_left = "—"
+        inviter_net = "—"
+        if inviter_id:
+            try:
+                stats = await self.db.get_user_stats(int(guild.id), int(inviter_id))
+            except Exception:
+                stats = None
+            if stats:
+                try:
+                    invite_count = int(stats[9]) if len(stats) > 9 else 0
+                except Exception:
+                    invite_count = 0
+                try:
+                    invite_left_count = int(stats[10]) if len(stats) > 10 else 0
+                except Exception:
+                    invite_left_count = 0
+                inviter_count = str(invite_count)
+                inviter_left = str(invite_left_count)
+                inviter_net = str(max(0, invite_count - invite_left_count))
         now = datetime.now(timezone.utc)
         desc = (
             f"{arrow2} Neues Mitglied beigetreten.\n\n"
             f"┏`👤` - Member: {member.mention} ({member.id})\n"
             f"┣`🤝` - Eingeladen von: {inviter_line}\n"
             f"┣`🔗` - Invite: `{code_line}`\n"
+            f"┣`🔁` - Invite-Code Nutzungen: **{invite_uses_line}**\n"
+            f"┣`📨` - Einladungen von Person: **{inviter_count}** (Net **{inviter_net}** • Left {inviter_left})\n"
             f"┗`⏰` - Zeitpunkt: {discord.utils.format_dt(now, style='f')}"
         )
         header = f"**{info} 𑁉 INVITE – JOIN**"
@@ -161,7 +185,8 @@ class InviteService:
             except Exception:
                 pass
             try:
-                await self._send_join_log(guild, member, inviter_id, used_code)
+                used_code_uses = int(current.get(used_code, (0, 0))[0]) if used_code in current else None
+                await self._send_join_log(guild, member, inviter_id, used_code, invite_uses=used_code_uses)
             except Exception:
                 pass
             return
@@ -172,7 +197,7 @@ class InviteService:
         except Exception:
             pass
         try:
-            await self._send_join_log(guild, member, 0, code)
+            await self._send_join_log(guild, member, 0, code, invite_uses=None)
         except Exception:
             pass
 

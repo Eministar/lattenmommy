@@ -1034,6 +1034,21 @@ class Database:
         )
         await self._conn.commit()
 
+    async def list_suggestions(self, guild_id: int, limit: int = 2000):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, user_id, forum_channel_id, thread_id,
+                   summary_message_id, vote_message_id, title, content,
+                   status, admin_response, upvotes, downvotes, created_at, updated_at
+            FROM suggestions
+            WHERE guild_id = ?
+            ORDER BY id DESC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
+
     async def upsert_user_stats(self, guild_id: int, user_id: int):
         await self._conn.execute("""
         INSERT OR IGNORE INTO user_stats (
@@ -2418,6 +2433,41 @@ class Database:
             (int(guild_id), int(case_id))
         )
         return await cur.fetchone()
+
+    async def delete_recent_infractions(self, guild_id: int, user_id: int, actions: list[str], limit: int = 1) -> int:
+        if not actions:
+            return 0
+        placeholders = ",".join(["?"] * len(actions))
+        params = (int(guild_id), int(user_id), *[str(a) for a in actions], int(max(1, int(limit))))
+        cur = await self._conn.execute(
+            f"""
+            DELETE FROM infractions
+            WHERE id IN (
+                SELECT id
+                FROM infractions
+                WHERE guild_id = ? AND user_id = ? AND action IN ({placeholders})
+                ORDER BY created_at DESC
+                LIMIT ?
+            );
+            """,
+            params,
+        )
+        await self._conn.commit()
+        try:
+            return int(cur.rowcount or 0)
+        except Exception:
+            return 0
+
+    async def update_infraction_reason(self, guild_id: int, case_id: int, reason: str | None) -> bool:
+        cur = await self._conn.execute(
+            "UPDATE infractions SET reason = ? WHERE guild_id = ? AND id = ?;",
+            (str(reason) if reason is not None else None, int(guild_id), int(case_id)),
+        )
+        await self._conn.commit()
+        try:
+            return int(cur.rowcount or 0) > 0
+        except Exception:
+            return False
 
     async def get_log_thread(self, guild_id: int, key: str) -> int | None:
         cur = await self._conn.execute(

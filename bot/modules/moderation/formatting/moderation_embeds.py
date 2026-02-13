@@ -182,3 +182,47 @@ def build_purge_embed(
     emb.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
     _footer(emb, settings, guild)
     return emb
+
+
+def build_unwarn_embed(
+    settings,
+    guild: discord.Guild,
+    moderator: discord.Member,
+    target: discord.Member,
+    removed: int,
+):
+    green = em(settings, "green", guild) or "🟢"
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    desc = (
+        f"{arrow2} Warn-Einträge wurden entfernt.\n\n"
+        f"┏`👤` - User: {target.mention} ({target.id})\n"
+        f"┣`🧑‍⚖️` - Moderator: {moderator.mention}\n"
+        f"┗`🧹` - Entfernt: **{int(removed)}**"
+    )
+    emb = discord.Embed(title=f"{green} 𑁉 UNWARN", description=desc, color=_color(settings, guild))
+    emb.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
+    _footer(emb, settings, guild)
+    return emb
+
+
+def build_case_reason_updated_embed(
+    settings,
+    guild: discord.Guild,
+    moderator: discord.Member,
+    case_id: int,
+    user_id: int,
+    reason: str | None,
+):
+    info = em(settings, "info", guild) or "ℹ️"
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    desc = (
+        f"{arrow2} Case-Grund wurde aktualisiert.\n\n"
+        f"┏`🆔` - Case: `{int(case_id)}`\n"
+        f"┣`👤` - User: <@{int(user_id)}>\n"
+        f"┣`🧑‍⚖️` - Moderator: {moderator.mention}\n"
+        f"┗`📝` - Neuer Grund: {_cut(reason, 900) if reason else '—'}"
+    )
+    emb = discord.Embed(title=f"{info} 𑁉 CASE UPDATE", description=desc, color=_color(settings, guild))
+    emb.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
+    _footer(emb, settings, guild)
+    return emb

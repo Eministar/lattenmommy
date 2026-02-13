@@ -37,6 +37,18 @@ class ModerationCommands(commands.Cog):
     def _need_guild(self, interaction: discord.Interaction):
         return interaction.guild and isinstance(interaction.user, discord.Member)
 
+    def _need_ctx(self, ctx: commands.Context) -> bool:
+        return bool(ctx.guild and isinstance(ctx.author, discord.Member))
+
+    async def _ctx_reply(self, ctx: commands.Context, text: str):
+        try:
+            await ctx.reply(text, mention_author=False)
+        except Exception:
+            try:
+                await ctx.send(text)
+            except Exception:
+                pass
+
     @app_commands.command(name="timeout", description="⏳ 𑁉 Timeout setzen")
     @app_commands.describe(user="User", minutes="Minuten (leer = Auto)", reason="Grund")
     async def timeout(self, interaction: discord.Interaction, user: discord.Member, minutes: int | None = None, reason: str | None = None):
@@ -342,3 +354,346 @@ class ModerationCommands(commands.Cog):
             lines.append(f"• Case `{cid}` • {reason or '—'}")
         text = "\n".join(lines) if lines else "Keine Notizen."
         await _ephemeral(interaction, text)
+
+    @app_commands.command(name="unwarn", description="🧹 𑁉 Letzte Warns/Timeouts entfernen")
+    @app_commands.describe(user="User", amount="Anzahl (1-20)")
+    async def unwarn(self, interaction: discord.Interaction, user: discord.Member, amount: int = 1):
+        if not self._need_guild(interaction):
+            return
+        if not is_staff(self.bot.settings, interaction.user):
+            return await _ephemeral(interaction, "Keine Rechte.")
+        n = max(1, min(20, int(amount)))
+        removed = await self.service.unwarn(interaction.guild, interaction.user, user, n)
+        await _ephemeral(interaction, f"Entfernt: **{removed}** Warn/Timeout-Einträge.")
+
+    @app_commands.command(name="case-reason", description="🛠️ 𑁉 Case-Grund ändern")
+    @app_commands.describe(case_id="Case-ID", reason="Neuer Grund")
+    async def case_reason(self, interaction: discord.Interaction, case_id: int, reason: str):
+        if not self._need_guild(interaction):
+            return
+        if not is_staff(self.bot.settings, interaction.user):
+            return await _ephemeral(interaction, "Keine Rechte.")
+        ok, err = await self.service.update_case_reason(interaction.guild, interaction.user, int(case_id), str(reason))
+        if not ok:
+            return await _ephemeral(interaction, "Case nicht gefunden oder Update fehlgeschlagen.")
+        await _ephemeral(interaction, f"Case `{int(case_id)}` aktualisiert.")
+
+    @app_commands.command(name="clearnotes", description="🧽 𑁉 Mod-Notizen löschen")
+    @app_commands.describe(user="User", amount="Anzahl (1-50)")
+    async def clear_notes(self, interaction: discord.Interaction, user: discord.Member, amount: int = 10):
+        if not self._need_guild(interaction):
+            return
+        if not is_staff(self.bot.settings, interaction.user):
+            return await _ephemeral(interaction, "Keine Rechte.")
+        n = max(1, min(50, int(amount)))
+        removed = await self.service.clear_notes(interaction.guild, interaction.user, user, n)
+        await _ephemeral(interaction, f"Entfernt: **{removed}** Notiz(en).")
+
+    @commands.command(name="timeout")
+    async def p_timeout(self, ctx: commands.Context, user: discord.Member, minutes: int | None = None, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.moderate_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
+        ok, err, used_minutes, strikes, case_id = await self.service.timeout(ctx.guild, ctx.author, user, minutes, reason)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Timeout ging nicht: {err}")
+        await self._ctx_reply(ctx, f"Timeout gesetzt: **{used_minutes}min** (Strike **{strikes}**). Case: `{case_id}`")
+
+    @commands.command(name="warn")
+    async def p_warn(self, ctx: commands.Context, user: discord.Member, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.moderate_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
+        strikes, case_id = await self.service.warn(ctx.guild, ctx.author, user, reason)
+        await self._ctx_reply(ctx, f"Warnung vergeben. Strikes jetzt: **{strikes}**. Case: `{case_id}`")
+
+    @commands.command(name="kick")
+    async def p_kick(self, ctx: commands.Context, user: discord.Member, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.kick_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Kick Members`.")
+        ok, err, case_id = await self.service.kick(ctx.guild, ctx.author, user, reason)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Kick ging nicht: {err}")
+        await self._ctx_reply(ctx, f"{user.mention} wurde gekickt. Case: `{case_id}`")
+
+    @commands.command(name="ban")
+    async def p_ban(self, ctx: commands.Context, user: discord.User, delete_days: int = 0, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.ban_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Ban Members`.")
+        ok, err, dd, case_id = await self.service.ban(ctx.guild, ctx.author, user, delete_days, reason)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Ban ging nicht: {err}")
+        await self._ctx_reply(ctx, f"<@{user.id}> wurde gebannt. (delete_days={dd}) Case: `{case_id}`")
+
+    @commands.command(name="purge")
+    async def p_purge(self, ctx: commands.Context, amount: int, user: discord.Member | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_messages:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Messages`.")
+        if not isinstance(ctx.channel, discord.TextChannel):
+            return await self._ctx_reply(ctx, "Nur in normalen Text-Channels.")
+        deleted, err, case_id = await self.service.purge(ctx.guild, ctx.author, ctx.channel, amount, user)
+        if err:
+            return await self._ctx_reply(ctx, f"Purge ging nicht: {err}")
+        await self._ctx_reply(ctx, f"Gelöscht: **{deleted}** Nachricht(en). Case: `{case_id}`")
+
+    @commands.command(name="untimeout")
+    async def p_untimeout(self, ctx: commands.Context, user: discord.Member, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.moderate_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
+        try:
+            await user.timeout(None, reason=reason or None)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Timeout entfernen ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, f"Timeout entfernt für {user.mention}.")
+
+    @commands.command(name="unban")
+    async def p_unban(self, ctx: commands.Context, user_id: int, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.ban_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Ban Members`.")
+        try:
+            await ctx.guild.unban(discord.Object(id=int(user_id)), reason=reason or None)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Unban ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, f"<@{user_id}> wurde entbannt.")
+
+    @commands.command(name="slowmode")
+    async def p_slowmode(self, ctx: commands.Context, seconds: int):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_channels:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Channels`.")
+        if not isinstance(ctx.channel, discord.TextChannel):
+            return await self._ctx_reply(ctx, "Nur in Text-Channels.")
+        s = max(0, min(21600, int(seconds)))
+        try:
+            await ctx.channel.edit(slowmode_delay=s)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Slowmode ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, f"Slowmode gesetzt: **{s}s**.")
+
+    @commands.command(name="lock")
+    async def p_lock(self, ctx: commands.Context):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_channels:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Channels`.")
+        if not isinstance(ctx.channel, discord.TextChannel):
+            return await self._ctx_reply(ctx, "Nur in Text-Channels.")
+        try:
+            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Lock ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, "Channel gesperrt.")
+
+    @commands.command(name="unlock")
+    async def p_unlock(self, ctx: commands.Context):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_channels:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Channels`.")
+        if not isinstance(ctx.channel, discord.TextChannel):
+            return await self._ctx_reply(ctx, "Nur in Text-Channels.")
+        try:
+            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Unlock ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, "Channel entsperrt.")
+
+    @commands.command(name="nick")
+    async def p_nick(self, ctx: commands.Context, user: discord.Member, *, nickname: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_nicknames:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Nicknames`.")
+        try:
+            await user.edit(nick=nickname or None)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Nick ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, f"Nickname gesetzt für {user.mention}.")
+
+    @commands.command(name="roleadd")
+    async def p_role_add(self, ctx: commands.Context, user: discord.Member, role: discord.Role):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_roles:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Roles`.")
+        try:
+            await user.add_roles(role)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Rolle hinzufügen ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, f"{role.mention} zu {user.mention} hinzugefügt.")
+
+    @commands.command(name="roleremove")
+    async def p_role_remove(self, ctx: commands.Context, user: discord.Member, role: discord.Role):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_roles:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Roles`.")
+        try:
+            await user.remove_roles(role)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Rolle entfernen ging nicht: {type(e).__name__}: {e}")
+        await self._ctx_reply(ctx, f"{role.mention} von {user.mention} entfernt.")
+
+    @commands.command(name="softban")
+    async def p_softban(self, ctx: commands.Context, user: discord.User, delete_days: int = 1, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.ban_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Ban Members`.")
+        ok, err, case_id = await self.service.softban(ctx.guild, ctx.author, user, delete_days, reason)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Softban ging nicht: {err}")
+        await self._ctx_reply(ctx, f"<@{user.id}> softbanned. Case: `{case_id}`")
+
+    @commands.command(name="masstimeout")
+    async def p_mass_timeout(self, ctx: commands.Context, role: discord.Role, minutes: int, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.moderate_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
+        ok_count = 0
+        fail_count = 0
+        for member in role.members:
+            ok, err, used, strikes, case_id = await self.service.timeout(ctx.guild, ctx.author, member, minutes, reason)
+            if ok:
+                ok_count += 1
+            else:
+                fail_count += 1
+        await self._ctx_reply(ctx, f"Mass-Timeout fertig. OK: **{ok_count}**, Fehler: **{fail_count}**.")
+
+    @commands.command(name="warns")
+    async def p_warns(self, ctx: commands.Context, user: discord.Member, limit: int = 10):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        n = max(1, min(20, int(limit)))
+        rows = await self.bot.db.list_infractions(ctx.guild.id, user.id, limit=n)
+        if not rows:
+            return await self._ctx_reply(ctx, "Keine Einträge.")
+        lines = []
+        for r in rows:
+            cid, action, dur, reason, created_at, mod_id = r
+            if str(action) not in {"warn", "timeout"}:
+                continue
+            lines.append(f"• Case `{cid}` • {action} • {reason or '—'}")
+        await self._ctx_reply(ctx, "\n".join(lines) if lines else "Keine Warns/Timeouts.")
+
+    @commands.command(name="case")
+    async def p_case(self, ctx: commands.Context, case_id: int):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        row = await self.bot.db.get_infraction(ctx.guild.id, int(case_id))
+        if not row:
+            return await self._ctx_reply(ctx, "Case nicht gefunden.")
+        cid, action, dur, reason, created_at, mod_id, user_id = row
+        text = (
+            f"┏`🆔` - Case: `{cid}`\n"
+            f"┣`👤` - User: <@{user_id}>\n"
+            f"┣`🧑‍⚖️` - Moderator: <@{mod_id}>\n"
+            f"┣`⚙️` - Action: **{action}**\n"
+            f"┣`⏳` - Dauer: **{dur or 0}**\n"
+            f"┗`📝` - Grund: {reason or '—'}"
+        )
+        await self._ctx_reply(ctx, text)
+
+    @commands.command(name="note")
+    async def p_note(self, ctx: commands.Context, user: discord.Member, *, note: str):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        case_id = await self.service.add_note(ctx.guild, ctx.author, user, note)
+        await self._ctx_reply(ctx, f"Notiz gespeichert. Case: `{case_id}`")
+
+    @commands.command(name="notes")
+    async def p_notes(self, ctx: commands.Context, user: discord.Member, limit: int = 10):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        n = max(1, min(20, int(limit)))
+        rows = await self.bot.db.list_infractions(ctx.guild.id, user.id, limit=n)
+        lines = []
+        for r in rows:
+            cid, action, dur, reason, created_at, mod_id = r
+            if str(action) != "note":
+                continue
+            lines.append(f"• Case `{cid}` • {reason or '—'}")
+        await self._ctx_reply(ctx, "\n".join(lines) if lines else "Keine Notizen.")
+
+    @commands.command(name="unwarn")
+    async def p_unwarn(self, ctx: commands.Context, user: discord.Member, amount: int = 1):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        n = max(1, min(20, int(amount)))
+        removed = await self.service.unwarn(ctx.guild, ctx.author, user, n)
+        await self._ctx_reply(ctx, f"Entfernt: **{removed}** Warn/Timeout-Einträge.")
+
+    @commands.command(name="casereason")
+    async def p_case_reason(self, ctx: commands.Context, case_id: int, *, reason: str):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        ok, err = await self.service.update_case_reason(ctx.guild, ctx.author, int(case_id), str(reason))
+        if not ok:
+            return await self._ctx_reply(ctx, "Case nicht gefunden oder Update fehlgeschlagen.")
+        await self._ctx_reply(ctx, f"Case `{int(case_id)}` aktualisiert.")
+
+    @commands.command(name="clearnotes")
+    async def p_clear_notes(self, ctx: commands.Context, user: discord.Member, amount: int = 10):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        n = max(1, min(50, int(amount)))
+        removed = await self.service.clear_notes(ctx.guild, ctx.author, user, n)
+        await self._ctx_reply(ctx, f"Entfernt: **{removed}** Notiz(en).")

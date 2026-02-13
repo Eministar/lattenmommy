@@ -654,7 +654,7 @@ class CountingService:
                 await self._apply_fail_state(channel_id, guild_id, state)
                 action = "fail"
             elif int(value) != int(state.current_number):
-                fail_reason = "Falsch gezaehlt."
+                fail_reason = "Falsch gezählt."
                 expected = state.current_number
                 got = value
                 await self._apply_fail_state(channel_id, guild_id, state)
@@ -703,7 +703,7 @@ class CountingService:
             await self._notify_fail(
                 message,
                 state,
-                reason=fail_reason or "Falsch gezaehlt.",
+                reason=fail_reason or "Falsch gezählt.",
                 expected=expected,
                 got=got,
             )

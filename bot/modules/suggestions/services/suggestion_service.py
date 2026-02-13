@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 import discord
 
 from bot.core.perms import is_staff
-from bot.modules.suggestions.formatting.suggestion_embeds import build_suggestion_summary_view
+from bot.modules.suggestions.formatting.suggestion_embeds import (
+    build_suggestion_summary_view,
+    build_suggestion_thread_info_container,
+)
 from bot.modules.suggestions.views.suggestion_panel import SuggestionPanelView
 
 ALLOWED_STATUSES = {"pending", "accepted", "denied", "implemented", "reviewing"}
@@ -103,6 +106,7 @@ class SuggestionService:
             return await self._ephemeral(interaction, "Suggestion-Forum nicht konfiguriert.")
         await interaction.response.defer(ephemeral=True)
         await self._ensure_panel_thread(interaction.guild, forum_channel)
+        await self._refresh_suggestion_threads(interaction.guild)
         try:
             await interaction.edit_original_response(content="Suggestion-Panel aktualisiert.")
         except Exception:
@@ -145,6 +149,56 @@ class SuggestionService:
             except Exception:
                 pass
 
+    def _build_thread_info_view(self, guild: discord.Guild) -> discord.ui.LayoutView:
+        view = discord.ui.LayoutView(timeout=None)
+        view.add_item(build_suggestion_thread_info_container(self.settings, guild))
+        return view
+
+    async def _refresh_thread_info_message(self, guild: discord.Guild, thread: discord.Thread):
+        info_view = self._build_thread_info_view(guild)
+
+        target = None
+        try:
+            pins = await thread.pins()
+            for msg in pins:
+                if not msg.author or not self.bot.user:
+                    continue
+                if int(msg.author.id) != int(self.bot.user.id):
+                    continue
+                if not msg.components:
+                    continue
+                target = msg
+                break
+        except Exception:
+            target = None
+
+        if target:
+            try:
+                await target.edit(view=info_view)
+                return
+            except Exception:
+                pass
+
+        try:
+            msg = await thread.send(view=info_view)
+            await msg.pin()
+        except Exception:
+            pass
+
+    async def _refresh_suggestion_threads(self, guild: discord.Guild, limit: int = 2000):
+        try:
+            rows = await self.db.list_suggestions(guild.id, limit=limit)
+        except Exception:
+            return
+        for row in rows:
+            s = _normalize_suggestion_row(row)
+            if not s:
+                continue
+            thread = await self._get_thread(guild, int(s["thread_id"]))
+            if not thread:
+                continue
+            await self.refresh_suggestion_message(guild, int(s["id"]))
+
     async def submit_suggestion(self, interaction: discord.Interaction, title: str, content: str):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await self._ephemeral(interaction, "Nur im Server nutzbar.")
@@ -180,6 +234,7 @@ class SuggestionService:
         }
         summary_view = build_suggestion_summary_view(self.settings, interaction.guild, summary_data, interaction.user)
         summary_msg = await thread.send(view=summary_view)
+        await self._refresh_thread_info_message(interaction.guild, thread)
         vote_msg = await thread.send("Stimme mit 👍 oder 👎 ab.")
         try:
             await vote_msg.add_reaction("👍")
@@ -233,14 +288,13 @@ class SuggestionService:
         try:
             msg = await thread.fetch_message(int(s["summary_message_id"]))
             await msg.edit(view=view)
-            return
         except Exception:
-            pass
-        try:
-            msg = await thread.send(view=view)
-            await self.db.update_suggestion_messages(int(s["id"]), int(msg.id), int(s["vote_message_id"]))
-        except Exception:
-            pass
+            try:
+                msg = await thread.send(view=view)
+                await self.db.update_suggestion_messages(int(s["id"]), int(msg.id), int(s["vote_message_id"]))
+            except Exception:
+                pass
+        await self._refresh_thread_info_message(guild, thread)
 
     async def set_status(self, interaction: discord.Interaction, status: str):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -335,4 +389,3 @@ class SuggestionService:
 
         await self.db.set_suggestion_votes(int(s["id"]), int(upvotes), int(downvotes))
         await self.refresh_suggestion_message(guild, int(s["id"]))
-

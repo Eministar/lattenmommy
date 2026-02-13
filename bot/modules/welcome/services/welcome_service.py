@@ -152,7 +152,16 @@ class WelcomeService:
         text = self._leave_text(guild.id)
         if not text:
             return
-        text = text.replace("{user}", member.mention).replace("{server}", guild.name)
+        safe_name = discord.utils.escape_markdown(member.display_name or member.name or str(member.id))
+        user_tag = discord.utils.escape_markdown(str(member))
+        text = (
+            text.replace("{user}", safe_name)
+            .replace("{user_name}", safe_name)
+            .replace("{user_tag}", user_tag)
+            .replace("{user_id}", str(member.id))
+            .replace("{user_mention}", member.mention)
+            .replace("{server}", guild.name)
+        )
         try:
             await ch.send(text)
         except Exception:

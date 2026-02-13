@@ -385,20 +385,30 @@ def build_support_panel_container(
     lifebuoy = em(settings, "lifebuoy", guild) or "🛟"
     sparkles = em(settings, "sparkles", guild) or "✨"
     stats = em(settings, "stats", guild) or "📈"
+    info = em(settings, "info", guild) or "ℹ️"
+    green = em(settings, "green", guild) or "🟢"
+    orange = em(settings, "orange", guild) or "🟠"
+    red = em(settings, "red", guild) or "🔴"
 
     header = f"**{lifebuoy} 𑁉 SUPPORT-PANEL**"
-    intro = f"{arrow2} Hilfe in Minuten – klar, strukturiert und persönlich."
-    cta = f"{sparkles} **Jetzt Ticket eröffnen** und dein Anliegen direkt beschreiben."
+    intro = f"{arrow2} Hilfe in Minuten. Klar, strukturiert und direkt im Server-Design."
+    cta = f"{sparkles} **Ticket starten** und dein Anliegen in der DM senden."
     flow = (
-        "1) Button klicken\n"
-        "2) Du bekommst eine DM\n"
-        "3) Anliegen beschreiben\n"
-        "4) Team antwortet im Ticket"
+        "┏`🎫` - Button klicken\n"
+        "┣`📩` - Du bekommst eine DM\n"
+        "┣`📝` - Anliegen kurz beschreiben\n"
+        "┗`🧵` - Team bearbeitet dein Ticket"
     )
     stats_block = (
-        f"Tickets gesamt: **{total}**\n"
-        f"Offen: **{open_}**\n"
-        f"Aktive User (24h): **{active}**"
+        f"┏`📦` - Tickets gesamt: **{total}**\n"
+        f"┣`{orange}` - Offen: **{open_}**\n"
+        f"┣`{green}` - Aktiv (24h): **{active}**\n"
+        f"┗`{red}` - Geschlossen: **{max(0, int(total) - int(open_))}**"
+    )
+    note_block = (
+        f"{info} **Hinweis**\n"
+        "Bitte pro Anliegen nur ein Ticket öffnen.\n"
+        "Mehr Infos = schnellere Bearbeitung."
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
@@ -408,7 +418,10 @@ def build_support_panel_container(
     container.add_item(discord.ui.TextDisplay(f"**So funktioniert es**\n{flow}"))
     container.add_item(discord.ui.Separator())
     container.add_item(discord.ui.TextDisplay(f"**{stats} Live-Stats**\n{stats_block}"))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay(note_block))
     if button:
+        container.add_item(discord.ui.Separator())
         row = discord.ui.ActionRow()
         row.add_item(button)
         container.add_item(row)

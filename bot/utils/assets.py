@@ -24,12 +24,15 @@ class Banners:
     POLL = asset_url("poll-banner.png")
     SEELSORGE = asset_url("seelsorge-banner.png")
     SUPPORT = asset_url("support-banner.png")
-    SUGGESTION_PANEL = asset_url("suggestions/suggestion-panel-banner.png")
+
+    SUGGESTION_PANEL = asset_url("suggestions/suggestion-waiting-banner.png")
     SUGGESTION_PENDING = asset_url("suggestions/suggestion-pending-banner.png")
     SUGGESTION_ACCEPTED = asset_url("suggestions/suggestion-accepted-banner.png")
     SUGGESTION_DENIED = asset_url("suggestions/suggestion-denied-banner.png")
     SUGGESTION_IMPLEMENTED = asset_url("suggestions/suggestion-implemented-banner.png")
     SUGGESTION_REVIEWING = asset_url("suggestions/suggestion-reviewing-banner.png")
+
+
     TEMPVOICE = asset_url("tempvoice-banner.png")
     WELCOME = asset_url("welcome-banner.png")
 

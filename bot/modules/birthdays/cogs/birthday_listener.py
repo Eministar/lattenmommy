@@ -15,3 +15,19 @@ class BirthdayListener(commands.Cog):
         if not self.bot.settings.get_guild_bool(message.guild.id, "birthday.enabled", True):
             return
         await self.service.auto_react(message)
+
+    @commands.Cog.listener("on_member_join")
+    async def on_member_join(self, member: discord.Member):
+        if not member.guild:
+            return
+        if not self.bot.settings.get_guild_bool(member.guild.id, "birthday.enabled", True):
+            return
+        await self.service.handle_member_join(member)
+
+    @commands.Cog.listener("on_member_remove")
+    async def on_member_remove(self, member: discord.Member):
+        if not member.guild:
+            return
+        if not self.bot.settings.get_guild_bool(member.guild.id, "birthday.enabled", True):
+            return
+        await self.service.handle_member_remove(member)
