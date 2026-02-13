@@ -19,6 +19,7 @@ from bot.modules.birthdays.cogs.birthday_listener import BirthdayListener
 from bot.modules.birthdays.cogs.birthday_commands import BirthdayCommands
 from bot.modules.birthdays.services.birthday_service import BirthdayService
 from bot.modules.roles.cogs.roles_commands import RolesCommands
+from bot.modules.roles.views.roles_info_panel import RolesInfoPanelView
 from bot.modules.giveaways.cogs.giveaway_commands import GiveawayCommands
 from bot.modules.giveaways.cogs.giveaway_listener import GiveawayListener
 from bot.modules.giveaways.services.giveaway_service import GiveawayService
@@ -173,6 +174,7 @@ class StarryBot(commands.Bot):
         self.add_dynamic_items(ApplicationDecisionButton)
         self.add_view(ApplicationPanelView(self.settings))
         self.add_view(SupportPanelView(self.settings))
+        self.add_view(RolesInfoPanelView(self.settings))
         self.add_view(SuggestionPanelView(self.settings))
         self.add_view(WortPanelView(self.wzs_service))
         self.add_view(WortInfoView(self.wzs_service))

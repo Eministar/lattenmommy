@@ -22,6 +22,11 @@ class Banners:
     INVITE = asset_url("invite-banner.png")
     PARLIAMENT = asset_url("parliament-banner.png")
     POLL = asset_url("poll-banner.png")
+    ROLES_PANEL = asset_url("roles/roles-banner.png")
+    ROLES_ACHIEVEMENTS = asset_url("roles/roles-achievements-banner.png")
+    ROLES_LEVEL = asset_url("roles/roles-level-banner.png")
+    ROLES_OTHER = asset_url("roles/roles-other-banner.png")
+    ROLES_TEAM = asset_url("roles/roles-team-banner.png")
     SEELSORGE = asset_url("seelsorge-banner.png")
     SUPPORT = asset_url("support-banner.png")
 

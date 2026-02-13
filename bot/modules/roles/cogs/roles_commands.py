@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from bot.core.perms import is_staff
 import asyncio
+from bot.modules.roles.views.roles_info_panel import RolesInfoPanelView
 
 
 class RolesCommands(commands.Cog):
@@ -10,6 +11,8 @@ class RolesCommands(commands.Cog):
         self.bot = bot
 
     roles = app_commands.Group(name="roles", description="🧩 𑁉 Rollen-Tools")
+    roll = app_commands.Group(name="roll", description="🧩 𑁉 Rollen-Bereich")
+    roll_info = app_commands.Group(name="roll-info", description="ℹ️ 𑁉 Rollen-Infos", parent=roll)
 
     @roles.command(name="sync", description="🔄 𑁉 Auto-Rollen syncen")
     async def sync(self, interaction: discord.Interaction):
@@ -73,3 +76,16 @@ class RolesCommands(commands.Cog):
             f"Mass-Role fertig. Hinzugefügt: **{added}**, Fehler: **{failed}**",
             ephemeral=True,
         )
+
+    @roll_info.command(name="panel-senden", description="ℹ️ 𑁉 Rollen-Info Panel senden")
+    @app_commands.describe(channel="Zielkanal (optional)")
+    async def roll_info_panel_send(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        if not is_staff(self.bot.settings, interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        target = channel or interaction.channel
+        if not isinstance(target, discord.abc.Messageable):
+            return await interaction.response.send_message("Zielkanal ungültig.", ephemeral=True)
+        await target.send(view=RolesInfoPanelView(self.bot.settings, interaction.guild))
+        await interaction.response.send_message("Rollen-Info Panel gesendet.", ephemeral=True)
