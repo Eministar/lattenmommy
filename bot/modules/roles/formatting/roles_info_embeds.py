@@ -63,6 +63,15 @@ def _role_ids_with_fallback(settings, guild: discord.Guild, key: str) -> list[in
     raw = settings.get_guild(guild.id, key, None)
     if raw in (None, "", [], {}):
         raw = settings.get(key, [])
+    if raw in (None, "", [], {}):
+        # Letzter Fallback: rohe Basis-Config (config.yml), falls Overrides leere Werte gesetzt haben.
+        node = getattr(settings, "_base", {}) or {}
+        for part in str(key).split("."):
+            if not isinstance(node, dict) or part not in node:
+                node = []
+                break
+            node = node[part]
+        raw = node
     return _to_role_ids(raw)
 
 
