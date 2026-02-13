@@ -204,7 +204,7 @@ def build_roles_category_view(settings, guild: discord.Guild, category: str) -> 
         icon = "🟢" if cnt > 0 else "⚪"
         lines.append(f"{icon} {role.mention} 𑁉 Besitzer: `x{cnt}`")
         if show_members:
-            lines.append("` `")
+            lines.append("")
             if not members:
                 lines.append("`┗👤` Mitglieder: `keine`")
             else:
@@ -216,7 +216,7 @@ def build_roles_category_view(settings, guild: discord.Guild, category: str) -> 
                     lines.append("`   ` " + "  •  ".join(grp))
                 if rest > 0:
                     lines.append(f"`   ` +`{rest}` weitere")
-            lines.append("` `")
+            lines.append("")
 
     empty_text = "Keine Rollen konfiguriert."
     if show_members:
