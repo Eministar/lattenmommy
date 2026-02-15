@@ -99,7 +99,6 @@ def build_suggestion_summary_view(settings, guild: discord.Guild | None, data: d
     status_emoji = _status_emoji(settings, guild, status)
     admin_response = (data.get("admin_response") or "").strip()
     author_name = getattr(author, "display_name", None) or getattr(author, "name", None) or f"User {uid}"
-    avatar_url = str(getattr(getattr(author, "display_avatar", None), "url", "") or "")
     up_icon = "📈"
     down_icon = "📉"
     vote_line = (
@@ -124,7 +123,6 @@ def build_suggestion_summary_view(settings, guild: discord.Guild | None, data: d
     )
 
     container = discord.ui.Container(accent_colour=_color(settings, guild))
-    _add_header_gallery(container, _status_banner(status), avatar_url)
     container.add_item(discord.ui.TextDisplay(f"**{info} 𑁉 VORSCHLAG**\n{body}"))
     view = discord.ui.LayoutView(timeout=None)
     view.add_item(container)

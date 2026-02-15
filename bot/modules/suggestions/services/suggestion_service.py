@@ -51,6 +51,7 @@ class SuggestionService:
         self.settings = settings
         self.db = db
         self.logger = logger
+        self._active_submissions: set[tuple[int, int]] = set()
 
     def _gi(self, guild_id: int, key: str, default: int = 0) -> int:
         return int(self.settings.get_guild_int(guild_id, key, default))
@@ -65,6 +66,39 @@ class SuggestionService:
         return str(
             self._g(guild_id, "suggestion.panel_thread_name", "💡 Vorschläge – Info") or "💡 Vorschläge – Info"
         )
+
+    def _status_emoji(self, status: str) -> str:
+        key = str(status or "pending").lower()
+        mapping = {
+            "pending": "🟠",
+            "reviewing": "🧪",
+            "accepted": "🟢",
+            "denied": "🔴",
+            "implemented": "🚀",
+        }
+        return mapping.get(key, "🟠")
+
+    def _status_tag_name(self, status: str) -> str:
+        key = str(status or "pending").lower()
+        mapping = {
+            "pending": "🟠 WARTEND",
+            "reviewing": "🧪 IN PRÜFUNG",
+            "accepted": "🟢 IN ARBEIT",
+            "denied": "🔴 ABGELEHNT",
+            "implemented": "🚀 UMGESETZT",
+        }
+        return mapping.get(key, "🟠 WARTEND")
+
+    def _status_tag_names(self) -> set[str]:
+        legacy = {"wartend", "in prüfung", "in arbeit", "abgelehnt", "umgesetzt"}
+        current = {
+            self._status_tag_name("pending"),
+            self._status_tag_name("reviewing"),
+            self._status_tag_name("accepted"),
+            self._status_tag_name("denied"),
+            self._status_tag_name("implemented"),
+        }
+        return {name.lower() for name in (legacy | current)}
 
     async def _ephemeral(self, interaction: discord.Interaction, text: str):
         try:
@@ -93,6 +127,48 @@ class SuggestionService:
         except Exception:
             ch = None
         return ch if isinstance(ch, discord.Thread) else None
+
+    async def _ensure_status_tag(self, forum: discord.ForumChannel, status: str) -> discord.ForumTag | None:
+        name = self._status_tag_name(status)
+        for tag in forum.available_tags:
+            if str(tag.name).lower() == name.lower():
+                return tag
+        try:
+            return await forum.create_tag(name=name)
+        except Exception:
+            return None
+
+    async def _apply_status_tag(self, thread: discord.Thread, status: str):
+        parent = getattr(thread, "parent", None)
+        if not isinstance(parent, discord.ForumChannel):
+            return
+        tag = await self._ensure_status_tag(parent, status)
+        if not tag:
+            return
+
+        keep = []
+        status_names = self._status_tag_names()
+        for t in list(getattr(thread, "applied_tags", []) or []):
+            if str(t.name).lower() not in status_names:
+                keep.append(t)
+        if all(int(getattr(t, "id", 0)) != int(tag.id) for t in keep):
+            keep.append(tag)
+        try:
+            await thread.edit(applied_tags=keep)
+        except Exception:
+            pass
+
+    async def _apply_status_presentation(self, guild: discord.Guild, thread: discord.Thread, data: dict):
+        status = str(data.get("status") or "pending").lower()
+        title = str(data.get("title") or "").strip() or "Ohne Titel"
+        sid = int(data.get("id") or 0)
+        desired = _truncate(f"{self._status_emoji(status)} Vorschlag #{sid} · {title}", 100)
+        if str(getattr(thread, "name", "")) != desired:
+            try:
+                await thread.edit(name=desired)
+            except Exception:
+                pass
+        await self._apply_status_tag(thread, status)
 
     async def send_panel(self, interaction: discord.Interaction, forum: discord.ForumChannel | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -215,59 +291,67 @@ class SuggestionService:
         if len(clean_content) < 10:
             return await self._ephemeral(interaction, "Bitte beschreibe deinen Vorschlag genauer.")
 
-        created = await forum.create_thread(
-            name=_truncate(f"💡 {clean_title}", 100),
-            content=f"Vorschlag von <@{interaction.user.id}>",
-        )
-        thread = created.thread
-
-        summary_data = {
-            "id": 0,
-            "user_id": int(interaction.user.id),
-            "title": clean_title,
-            "content": clean_content,
-            "status": "pending",
-            "admin_response": "",
-            "upvotes": 0,
-            "downvotes": 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        summary_view = build_suggestion_summary_view(self.settings, interaction.guild, summary_data, interaction.user)
-        summary_msg = await thread.send(view=summary_view)
-        await self._refresh_thread_info_message(interaction.guild, thread)
-        vote_msg = await thread.send("Stimme mit 👍 oder 👎 ab.")
+        submit_key = (int(interaction.guild.id), int(interaction.user.id))
+        if submit_key in self._active_submissions:
+            return await self._ephemeral(interaction, "Dein Vorschlag wird schon erstellt. Bitte kurz warten.")
+        self._active_submissions.add(submit_key)
         try:
-            await vote_msg.add_reaction("👍")
-            await vote_msg.add_reaction("👎")
-        except Exception:
-            pass
+            pending_tag = await self._ensure_status_tag(forum, "pending")
+            thread_kwargs = {
+                "name": _truncate(f"💡 {clean_title}", 100),
+                "content": f"Vorschlag von <@{interaction.user.id}>",
+            }
+            if pending_tag:
+                thread_kwargs["applied_tags"] = [pending_tag]
+            created = await forum.create_thread(**thread_kwargs)
+            thread = created.thread
 
-        suggestion_id = await self.db.create_suggestion(
-            guild_id=int(interaction.guild.id),
-            user_id=int(interaction.user.id),
-            forum_channel_id=int(forum.id),
-            thread_id=int(thread.id),
-            summary_message_id=int(summary_msg.id),
-            vote_message_id=int(vote_msg.id),
-            title=clean_title,
-            content=clean_content,
-        )
+            summary_data = {
+                "id": 0,
+                "user_id": int(interaction.user.id),
+                "title": clean_title,
+                "content": clean_content,
+                "status": "pending",
+                "admin_response": "",
+                "upvotes": 0,
+                "downvotes": 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            summary_view = build_suggestion_summary_view(self.settings, interaction.guild, summary_data, interaction.user)
+            summary_msg = await thread.send(view=summary_view)
+            await self._refresh_thread_info_message(interaction.guild, thread)
+            vote_msg = await thread.send("Stimme mit 👍 oder 👎 ab.")
+            try:
+                await vote_msg.add_reaction("👍")
+                await vote_msg.add_reaction("👎")
+            except Exception:
+                pass
 
-        try:
-            await thread.edit(name=_truncate(f"💡 Vorschlag #{int(suggestion_id)} · {clean_title}", 100))
-        except Exception:
-            pass
-
-        await self.refresh_suggestion_message(interaction.guild, int(suggestion_id))
-        await self._ephemeral(interaction, f"Vorschlag eingereicht. Thread: {thread.mention}")
-        try:
-            await self.logger.emit(
-                self.bot,
-                "suggestion_created",
-                {"suggestion_id": int(suggestion_id), "user_id": int(interaction.user.id), "thread_id": int(thread.id)},
+            suggestion_id = await self.db.create_suggestion(
+                guild_id=int(interaction.guild.id),
+                user_id=int(interaction.user.id),
+                forum_channel_id=int(forum.id),
+                thread_id=int(thread.id),
+                summary_message_id=int(summary_msg.id),
+                vote_message_id=int(vote_msg.id),
+                title=clean_title,
+                content=clean_content,
             )
-        except Exception:
-            pass
+
+            summary_data["id"] = int(suggestion_id)
+            await self._apply_status_presentation(interaction.guild, thread, summary_data)
+            await self.refresh_suggestion_message(interaction.guild, int(suggestion_id))
+            await self._ephemeral(interaction, f"Vorschlag eingereicht. Thread: {thread.mention}")
+            try:
+                await self.logger.emit(
+                    self.bot,
+                    "suggestion_created",
+                    {"suggestion_id": int(suggestion_id), "user_id": int(interaction.user.id), "thread_id": int(thread.id)},
+                )
+            except Exception:
+                pass
+        finally:
+            self._active_submissions.discard(submit_key)
 
     async def refresh_suggestion_message(self, guild: discord.Guild, suggestion_id: int):
         row = await self.db.get_suggestion(int(suggestion_id))
@@ -277,6 +361,7 @@ class SuggestionService:
         thread = await self._get_thread(guild, int(s["thread_id"]))
         if not thread:
             return
+        await self._apply_status_presentation(guild, thread, s)
         author = guild.get_member(int(s["user_id"]))
         if not author:
             try:
