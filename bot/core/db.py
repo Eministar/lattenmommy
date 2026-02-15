@@ -357,6 +357,18 @@ class Database:
         );
         """)
         await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS custom_roles (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            role_name TEXT NOT NULL,
+            emojis_json TEXT NOT NULL,
+            max_emojis INTEGER NOT NULL DEFAULT 3,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
+        await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS achievements (
             guild_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -2514,6 +2526,58 @@ class Database:
             (int(guild_id),),
         )
         return await cur.fetchone()
+
+    async def get_custom_role(self, guild_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, user_id, role_id, role_name, emojis_json, max_emojis, updated_at
+            FROM custom_roles
+            WHERE guild_id = ? AND user_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(user_id)),
+        )
+        return await cur.fetchone()
+
+    async def upsert_custom_role(
+        self,
+        guild_id: int,
+        user_id: int,
+        role_id: int,
+        role_name: str,
+        emojis_json: str,
+        max_emojis: int,
+    ):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO custom_roles (guild_id, user_id, role_id, role_name, emojis_json, max_emojis, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                role_id = excluded.role_id,
+                role_name = excluded.role_name,
+                emojis_json = excluded.emojis_json,
+                max_emojis = excluded.max_emojis,
+                updated_at = excluded.updated_at;
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(role_id),
+                str(role_name),
+                str(emojis_json),
+                int(max_emojis),
+                now,
+            ),
+        )
+        await self._conn.commit()
+
+    async def delete_custom_role(self, guild_id: int, user_id: int):
+        await self._conn.execute(
+            "DELETE FROM custom_roles WHERE guild_id = ? AND user_id = ?;",
+            (int(guild_id), int(user_id)),
+        )
+        await self._conn.commit()
 
     async def set_flag_quiz_channel(self, guild_id: int, channel_id: int | None):
         now = await self.now_iso()
