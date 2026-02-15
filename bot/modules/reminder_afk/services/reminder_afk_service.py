@@ -17,6 +17,7 @@ class ReminderAfkService:
         self.db = db
         self.logger = logger
         self._afk_notice_cache: dict[tuple[int, int, int], float] = {}
+        self._afk_set_grace_cache: dict[tuple[int, int], float] = {}
 
     def enabled(self, guild_id: int) -> bool:
         return bool(self.settings.get_guild(guild_id, "reminder_afk.enabled", True))
@@ -26,6 +27,12 @@ class ReminderAfkService:
             return max(5, int(self.settings.get_guild(guild_id, "reminder_afk.afk_notice_cooldown_seconds", 25) or 25))
         except Exception:
             return 25
+
+    def _afk_set_grace_seconds(self, guild_id: int) -> int:
+        try:
+            return max(0, int(self.settings.get_guild(guild_id, "reminder_afk.afk_set_grace_seconds", 6) or 6))
+        except Exception:
+            return 6
 
     def _parse_duration(self, text: str | None) -> int | None:
         raw = str(text or "").strip().lower()
@@ -80,6 +87,7 @@ class ReminderAfkService:
             until_at = (datetime.now(timezone.utc) + timedelta(seconds=int(sec))).isoformat()
         await self.db.set_afk_status(member.guild.id, member.id, text, until_at=until_at)
         await self.db.clear_afk_mention_events(member.guild.id, member.id)
+        self._afk_set_grace_cache[(int(member.guild.id), int(member.id))] = datetime.now(timezone.utc).timestamp()
 
         set_at = datetime.now(timezone.utc)
         lines = [
@@ -253,12 +261,16 @@ class ReminderAfkService:
 
         author_afk = await self.db.get_afk_status(message.guild.id, message.author.id)
         if author_afk:
-            ok, summary_view = await self.clear_afk_with_summary(message.guild, message.author)
-            if ok and summary_view:
-                try:
-                    await message.reply(view=summary_view, mention_author=False)
-                except Exception:
-                    pass
+            grace = self._afk_set_grace_seconds(message.guild.id)
+            key_self = (int(message.guild.id), int(message.author.id))
+            set_ts = float(self._afk_set_grace_cache.get(key_self, 0.0) or 0.0)
+            if (datetime.now(timezone.utc).timestamp() - set_ts) > grace:
+                ok, summary_view = await self.clear_afk_with_summary(message.guild, message.author)
+                if ok and summary_view:
+                    try:
+                        await message.reply(view=summary_view, mention_author=False)
+                    except Exception:
+                        pass
 
         mentions = [m for m in (message.mentions or []) if isinstance(m, discord.Member) and not m.bot and m.id != message.author.id]
         if not mentions:
