@@ -389,7 +389,10 @@ class Database:
             delivered_at TEXT
         );
         """)
-        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(delivered_at, remind_at)")
+        if self._driver == "mysql":
+            await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(delivered_at(32), remind_at(32))")
+        else:
+            await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(delivered_at, remind_at)")
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS achievements (
             guild_id INTEGER NOT NULL,
