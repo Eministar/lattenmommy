@@ -264,9 +264,15 @@ class ReminderAfkService:
             grace = self._afk_set_grace_seconds(message.guild.id)
             key_self = (int(message.guild.id), int(message.author.id))
             set_ts = float(self._afk_set_grace_cache.get(key_self, 0.0) or 0.0)
-            if (datetime.now(timezone.utc).timestamp() - set_ts) > grace:
+            try:
+                db_set_ts = datetime.fromisoformat(str(author_afk[3] or "")).timestamp()
+            except Exception:
+                db_set_ts = 0.0
+            effective_set_ts = max(set_ts, db_set_ts)
+            if (datetime.now(timezone.utc).timestamp() - effective_set_ts) > grace:
                 ok, summary_view = await self.clear_afk_with_summary(message.guild, message.author)
                 if ok and summary_view:
+                    self._afk_set_grace_cache.pop(key_self, None)
                     try:
                         await message.reply(view=summary_view, mention_author=False)
                     except Exception:
