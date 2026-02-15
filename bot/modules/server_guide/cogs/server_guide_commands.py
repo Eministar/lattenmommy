@@ -15,9 +15,9 @@ class ServerGuideCommands(commands.Cog):
 
     guide = app_commands.Group(name="guide", description="📘 𑁉 Server-Guide")
 
-    @guide.command(name="build", description="📘 𑁉 Erstellt Guide-Threads für alle Module")
-    @app_commands.describe(channel="Forum- oder Text-Channel für den Guide")
-    async def build(self, interaction: discord.Interaction, channel: discord.TextChannel | discord.ForumChannel | None = None):
+    @guide.command(name="build", description="📘 𑁉 Erstellt Guide-Posts im Forum für alle Module")
+    @app_commands.describe(channel="Forum-Channel für den Guide")
+    async def build(self, interaction: discord.Interaction, channel: discord.ForumChannel | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
         if not is_staff(self.bot.settings, interaction.user):

@@ -104,49 +104,42 @@ class ServerGuideService:
         guides.sort(key=lambda g: g.title.lower())
         return guides
 
-    async def _create_thread(self, target: discord.abc.GuildChannel, name: str, starter_text: str) -> discord.Thread | None:
-        if isinstance(target, discord.ForumChannel):
-            try:
-                result = await target.create_thread(name=name[:100], content=starter_text[:1900])
-                thread = getattr(result, "thread", None)
-                return thread or result
-            except Exception:
-                return None
+    async def _create_post(self, forum: discord.ForumChannel, name: str, starter_text: str) -> discord.Thread | None:
+        try:
+            result = await forum.create_thread(name=name[:100], content=starter_text[:1900])
+            thread = getattr(result, "thread", None)
+            return thread or result
+        except Exception:
+            return None
 
-        if isinstance(target, discord.TextChannel):
-            try:
-                msg = await target.send(starter_text[:1900])
-                thread = await msg.create_thread(name=name[:100], auto_archive_duration=10080)
-                return thread
-            except Exception:
-                return None
-
-        return None
-
-    async def build(self, guild: discord.Guild, target: discord.TextChannel | discord.ForumChannel | None = None) -> tuple[bool, str]:
+    async def build(self, guild: discord.Guild, target: discord.ForumChannel | None = None) -> tuple[bool, str]:
         if not self.enabled(guild.id):
             return False, "Server-Guide ist deaktiviert."
 
-        channel = target
-        if channel is None:
-            cid = int(self.settings.get_guild(guild.id, "server_guide.channel_id", 0) or 0)
+        forum = target
+        if forum is None:
+            cid = int(self.settings.get_guild(guild.id, "server_guide.forum_channel_id", 0) or 0)
+            if not cid:
+                cid = int(self.settings.get_guild(guild.id, "server_guide.channel_id", 0) or 0)
             if cid:
-                channel = guild.get_channel(cid)
-                if channel is None:
+                forum = guild.get_channel(cid)
+                if forum is None:
                     try:
-                        channel = await guild.fetch_channel(cid)
+                        forum = await guild.fetch_channel(cid)
                     except Exception:
-                        channel = None
-        if channel is None:
-            return False, "Kein Guide-Channel gesetzt. Bitte Channel angeben oder `server_guide.channel_id` konfigurieren."
+                        forum = None
+        if forum is None:
+            return False, "Kein Guide-Forum gesetzt. Bitte Forum-Channel angeben oder `server_guide.forum_channel_id` konfigurieren."
+        if not isinstance(forum, discord.ForumChannel):
+            return False, "Der Guide-Kanal muss ein Forum sein."
 
         guides = self.collect_module_guides()
         if not guides:
             return False, "Keine Module/Commands gefunden."
 
-        hub = await self._create_thread(channel, "📘 Server Guide • Übersicht", "Hier entsteht dein kompletter Modul-Guide.")
+        hub = await self._create_post(forum, "📘 Server Guide • Übersicht", "Hier entsteht dein kompletter Modul-Guide.")
         if not hub:
-            return False, "Guide-Hub-Thread konnte nicht erstellt werden."
+            return False, "Guide-Hub-Post konnte nicht erstellt werden."
 
         try:
             await hub.send(embed=build_hub_embed(self.settings, guild, len(guides)))
@@ -156,7 +149,7 @@ class ServerGuideService:
         created = 0
         for g in guides:
             thread_name = f"📚 {g.title} • Guide"
-            th = await self._create_thread(channel, thread_name, f"Guide für Modul: **{g.title}**")
+            th = await self._create_post(forum, thread_name, f"Guide für Modul: **{g.title}**")
             if not th:
                 continue
             created += 1
@@ -169,4 +162,4 @@ class ServerGuideService:
             except Exception:
                 pass
 
-        return True, f"Guide erstellt. Hub: {hub.mention} | Modul-Threads: **{created}/{len(guides)}**"
+        return True, f"Guide erstellt. Hub: {hub.mention} | Modul-Posts: **{created}/{len(guides)}**"
