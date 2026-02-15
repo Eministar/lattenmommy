@@ -47,11 +47,25 @@ class CustomRoleCommands(commands.Cog):
             return
         if not self.service.enabled(message.guild.id):
             return
-        if message.mention_everyone or message.role_mentions:
+        if message.mention_everyone:
             return
+
         mentions = [m for m in (message.mentions or []) if isinstance(m, discord.Member) and not m.bot and m.id != message.author.id]
-        if not mentions:
+        has_ping_target = bool(mentions)
+
+        if not has_ping_target and message.role_mentions:
+            row = await self.bot.db.get_custom_role(message.guild.id, message.author.id)
+            if row:
+                try:
+                    own_role_id = int(row[2] or 0)
+                except Exception:
+                    own_role_id = 0
+                if own_role_id > 0 and any(int(r.id) == own_role_id for r in message.role_mentions):
+                    has_ping_target = True
+
+        if not has_ping_target:
             return
+
         emojis, _ = await self.service.read_reactions(message.guild.id, message.author.id)
         if not emojis:
             return

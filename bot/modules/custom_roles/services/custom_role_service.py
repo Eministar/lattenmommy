@@ -6,6 +6,7 @@ import re
 import discord
 
 _CUSTOM_EMOJI_RE = re.compile(r"^<a?:[A-Za-z0-9_]{1,32}:(\d{15,21})>$")
+_CUSTOM_EMOJI_SHORT_RE = re.compile(r"^:([A-Za-z0-9_]{2,32}):$")
 
 
 class CustomRoleService:
@@ -125,6 +126,7 @@ class CustomRoleService:
     def sanitize_emojis(self, guild: discord.Guild, emojis: list[str], max_emojis: int) -> tuple[list[str], list[str]]:
         valid: list[str] = []
         invalid: list[str] = []
+        guild_emoji_by_name = {str(e.name): e for e in (guild.emojis or [])}
         for token in emojis:
             t = str(token or "").strip()
             if not t:
@@ -136,6 +138,14 @@ class CustomRoleService:
                     invalid.append(t)
                     continue
                 valid.append(str(e))
+                continue
+            m_short = _CUSTOM_EMOJI_SHORT_RE.match(t)
+            if m_short:
+                by_name = guild_emoji_by_name.get(str(m_short.group(1)))
+                if by_name is None:
+                    invalid.append(t)
+                    continue
+                valid.append(str(by_name))
                 continue
             valid.append(t)
         out = valid[: max(1, min(20, int(max_emojis)))]
@@ -216,6 +226,8 @@ class CustomRoleService:
                 pass
 
         cleaned, invalid = self.sanitize_emojis(guild, emojis, max_emojis)
+        if not cleaned:
+            return False, "Keine gültigen Emojis. Erlaubt sind Unicode oder Server-Custom-Emojis."
         try:
             await self.db.upsert_custom_role(
                 guild.id,
@@ -243,6 +255,8 @@ class CustomRoleService:
         except Exception:
             return False, "Dein gespeicherter Custom-Role-Datensatz ist ungültig."
         cleaned, invalid = self.sanitize_emojis(member.guild, emojis, max_emojis)
+        if not cleaned:
+            return False, "Keine gültigen Emojis. Erlaubt sind Unicode oder Server-Custom-Emojis."
         try:
             await self.db.upsert_custom_role(
                 member.guild.id,
