@@ -638,6 +638,40 @@ class Database:
             PRIMARY KEY (vote_id, user_id)
         );
         """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS flag_quiz_guilds (
+            guild_id INTEGER NOT NULL,
+            quiz_channel_id INTEGER,
+            dashboard_message_id INTEGER,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS flag_quiz_players (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            total_points INTEGER NOT NULL DEFAULT 0,
+            correct INTEGER NOT NULL DEFAULT 0,
+            wrong INTEGER NOT NULL DEFAULT 0,
+            current_streak INTEGER NOT NULL DEFAULT 0,
+            best_streak INTEGER NOT NULL DEFAULT 0,
+            last_daily TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS flag_quiz_flags (
+            guild_id INTEGER NOT NULL,
+            country_code TEXT NOT NULL,
+            asked INTEGER NOT NULL DEFAULT 0,
+            correct INTEGER NOT NULL DEFAULT 0,
+            wrong INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, country_code)
+        );
+        """)
 
     async def _ensure_user_stats_columns(self):
         await self._ensure_column("user_stats", "invite_count", "INTEGER NOT NULL DEFAULT 0")
@@ -2468,6 +2502,197 @@ class Database:
             return int(cur.rowcount or 0) > 0
         except Exception:
             return False
+
+    async def get_flag_quiz_guild(self, guild_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, quiz_channel_id, dashboard_message_id, updated_at
+            FROM flag_quiz_guilds
+            WHERE guild_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id),),
+        )
+        return await cur.fetchone()
+
+    async def set_flag_quiz_channel(self, guild_id: int, channel_id: int | None):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO flag_quiz_guilds (guild_id, quiz_channel_id, dashboard_message_id, updated_at)
+            VALUES (?, ?, NULL, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                quiz_channel_id = excluded.quiz_channel_id,
+                updated_at = excluded.updated_at;
+            """,
+            (int(guild_id), int(channel_id) if channel_id else None, now),
+        )
+        await self._conn.commit()
+
+    async def set_flag_quiz_dashboard_message(self, guild_id: int, message_id: int | None):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO flag_quiz_guilds (guild_id, quiz_channel_id, dashboard_message_id, updated_at)
+            VALUES (?, NULL, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                dashboard_message_id = excluded.dashboard_message_id,
+                updated_at = excluded.updated_at;
+            """,
+            (int(guild_id), int(message_id) if message_id else None, now),
+        )
+        await self._conn.commit()
+
+    async def get_flag_player_stats(self, guild_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, user_id, total_points, correct, wrong, current_streak, best_streak, last_daily, updated_at
+            FROM flag_quiz_players
+            WHERE guild_id = ? AND user_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(user_id)),
+        )
+        return await cur.fetchone()
+
+    async def upsert_flag_player_stats(
+        self,
+        guild_id: int,
+        user_id: int,
+        total_points: int,
+        correct: int,
+        wrong: int,
+        current_streak: int,
+        best_streak: int,
+        last_daily: str | None,
+    ):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO flag_quiz_players (
+                guild_id, user_id, total_points, correct, wrong, current_streak, best_streak, last_daily, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                total_points = excluded.total_points,
+                correct = excluded.correct,
+                wrong = excluded.wrong,
+                current_streak = excluded.current_streak,
+                best_streak = excluded.best_streak,
+                last_daily = excluded.last_daily,
+                updated_at = excluded.updated_at;
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(total_points),
+                int(correct),
+                int(wrong),
+                int(current_streak),
+                int(best_streak),
+                str(last_daily) if last_daily else None,
+                now,
+            ),
+        )
+        await self._conn.commit()
+
+    async def list_flag_players_top_points(self, guild_id: int, limit: int = 10):
+        cur = await self._conn.execute(
+            """
+            SELECT user_id, total_points, correct, wrong, current_streak, best_streak
+            FROM flag_quiz_players
+            WHERE guild_id = ?
+            ORDER BY total_points DESC, correct DESC, updated_at ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def list_flag_players_top_streak(self, guild_id: int, limit: int = 10):
+        cur = await self._conn.execute(
+            """
+            SELECT user_id, current_streak, best_streak, total_points
+            FROM flag_quiz_players
+            WHERE guild_id = ?
+            ORDER BY current_streak DESC, best_streak DESC, total_points DESC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def count_flag_players(self, guild_id: int) -> int:
+        cur = await self._conn.execute(
+            "SELECT COUNT(*) FROM flag_quiz_players WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        row = await cur.fetchone()
+        return int(row[0] if row else 0)
+
+    async def sum_flag_rounds(self, guild_id: int) -> int:
+        cur = await self._conn.execute(
+            "SELECT COALESCE(SUM(correct + wrong), 0) FROM flag_quiz_players WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        row = await cur.fetchone()
+        return int(row[0] if row else 0)
+
+    async def best_flag_streak(self, guild_id: int) -> int:
+        cur = await self._conn.execute(
+            "SELECT COALESCE(MAX(best_streak), 0) FROM flag_quiz_players WHERE guild_id = ?;",
+            (int(guild_id),),
+        )
+        row = await cur.fetchone()
+        return int(row[0] if row else 0)
+
+    async def get_flag_stats(self, guild_id: int, country_code: str):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, country_code, asked, correct, wrong, updated_at
+            FROM flag_quiz_flags
+            WHERE guild_id = ? AND country_code = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), str(country_code).upper()),
+        )
+        return await cur.fetchone()
+
+    async def upsert_flag_stats(self, guild_id: int, country_code: str, asked: int, correct: int, wrong: int):
+        now = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO flag_quiz_flags (guild_id, country_code, asked, correct, wrong, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, country_code) DO UPDATE SET
+                asked = excluded.asked,
+                correct = excluded.correct,
+                wrong = excluded.wrong,
+                updated_at = excluded.updated_at;
+            """,
+            (
+                int(guild_id),
+                str(country_code).upper(),
+                int(asked),
+                int(correct),
+                int(wrong),
+                now,
+            ),
+        )
+        await self._conn.commit()
+
+    async def list_flag_stats_top_asked(self, guild_id: int, limit: int = 10):
+        cur = await self._conn.execute(
+            """
+            SELECT country_code, asked, correct, wrong
+            FROM flag_quiz_flags
+            WHERE guild_id = ?
+            ORDER BY asked DESC, correct DESC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(limit)),
+        )
+        return await cur.fetchall()
 
     async def get_log_thread(self, guild_id: int, key: str) -> int | None:
         cur = await self._conn.execute(

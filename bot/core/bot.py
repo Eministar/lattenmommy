@@ -20,6 +20,9 @@ from bot.modules.birthdays.cogs.birthday_commands import BirthdayCommands
 from bot.modules.birthdays.services.birthday_service import BirthdayService
 from bot.modules.roles.cogs.roles_commands import RolesCommands
 from bot.modules.roles.views.roles_info_panel import RolesInfoPanelView
+from bot.modules.flags.services.flag_quiz_service import FlagQuizService
+from bot.modules.flags.cogs.flag_commands import FlagCommands
+from bot.modules.flags.cogs.flag_listener import FlagListener
 from bot.modules.giveaways.cogs.giveaway_commands import GiveawayCommands
 from bot.modules.giveaways.cogs.giveaway_listener import GiveawayListener
 from bot.modules.giveaways.services.giveaway_service import GiveawayService
@@ -117,6 +120,7 @@ class StarryBot(commands.Bot):
         self.parlament_service = ParliamentService(self, self.settings, self.db, self.logger)
         self.invite_service = InviteService(self, self.settings, self.db, self.logger)
         self.bot_status_service = BotStatusService(self, self.settings, self.logger)
+        self.flag_quiz_service = FlagQuizService(self, self.settings, self.db, self.logger)
 
         self.forum_logs = ForumLogService(self, self.settings, self.db)
         self._boot_done = False
@@ -141,6 +145,8 @@ class StarryBot(commands.Bot):
         await self.add_cog(BirthdayListener(self))
         await self.add_cog(BirthdayCommands(self))
         await self.add_cog(RolesCommands(self))
+        await self.add_cog(FlagListener(self))
+        await self.add_cog(FlagCommands(self))
         await self.add_cog(GiveawayCommands(self))
         await self.add_cog(GiveawayListener(self))
         await self.add_cog(PollCommands(self))
