@@ -124,12 +124,10 @@ def build_news_view(settings, guild: discord.Guild | None, item: NewsItem, ping_
         except Exception:
             pass
 
-    if item.video_id:
-        stats_text = "Stats werden stündlich aktualisiert."
-        if item.stats:
-            views = _fmt_number(item.stats.get("views"))
-            likes = _fmt_number(item.stats.get("likes"))
-            stats_text = f"┏`👀` - Aufrufe: **{views}**\n┗`👍` - Likes: **{likes}**"
+    if item.video_id and item.stats:
+        views = _fmt_number(item.stats.get("views"))
+        likes = _fmt_number(item.stats.get("likes"))
+        stats_text = f"┏`👀` - Aufrufe: **{views}**\n┗`👍` - Likes: **{likes}**"
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(f"**📊 YouTube Stats**\n{stats_text}"))
 

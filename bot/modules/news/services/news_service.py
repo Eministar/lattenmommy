@@ -30,14 +30,14 @@ class NewsService:
         self._yt_cache: dict[str, tuple[str, float]] = {}
         self._last_stats_check: dict[int, datetime] = {}
 
+    def _youtube_stats_enabled(self, guild_id: int) -> bool:
+        return self.settings.get_guild_bool(guild_id, "news.youtube_stats_enabled", False)
+
     async def tick(self):
         now = datetime.now(timezone.utc)
         due = []
         for guild in list(self.bot.guilds):
             if not self.settings.get_guild_bool(guild.id, "news.enabled", True):
-                continue
-            channel_id = self.settings.get_guild_int(guild.id, "news.channel_id", 0)
-            if not channel_id:
                 continue
             interval = self._interval_minutes(guild)
             last_check = self._last_check.get(guild.id)
@@ -64,8 +64,8 @@ class NewsService:
             return False, "Keine News gefunden."
         ok = False
         err = None
-        for source_key, item in items:
-            sent, err = await self._maybe_send_latest(guild, source_key, item, force=force)
+        for source_key, item, source in items:
+            sent, err = await self._maybe_send_latest(guild, source_key, item, force=force, source=source)
             ok = ok or sent
         return ok, err
 
@@ -79,7 +79,7 @@ class NewsService:
         item = await self._fetch_latest_source(guild, source)
         if not item:
             return False, "Kein Video gefunden."
-        return await self._maybe_send_latest(guild, source_key, item, force=True)
+        return await self._maybe_send_latest(guild, source_key, item, force=True, source=source)
 
     def _interval_minutes(self, guild: discord.Guild) -> float:
         try:
@@ -89,9 +89,9 @@ class NewsService:
 
     async def _process_guild(self, guild: discord.Guild):
         items = await self._fetch_latest_items(guild)
-        for source_key, item in items:
+        for source_key, item, source in items:
             try:
-                await self._maybe_send_latest(guild, source_key, item, force=False)
+                await self._maybe_send_latest(guild, source_key, item, force=False, source=source)
             except Exception:
                 pass
 
@@ -101,29 +101,21 @@ class NewsService:
         source_key: str,
         item: NewsItem | None,
         force: bool = False,
+        source: dict | None = None,
     ) -> tuple[bool, str | None]:
         if not item:
             return False, "Keine News gefunden."
 
-        channel_id = self.settings.get_guild_int(guild.id, "news.channel_id", 0)
-        if not channel_id:
-            return False, "News-Channel ist nicht konfiguriert."
-
-        channel = guild.get_channel(int(channel_id))
+        channel = await self._resolve_target_channel(guild, source)
         if channel is None:
-            try:
-                channel = await guild.fetch_channel(int(channel_id))
-            except Exception:
-                channel = None
-        if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.abc.Messageable)):
-            return False, "News-Channel ungültig."
+            return False, "News-Channel ist nicht konfiguriert."
 
         last_map = self.settings.get_guild(guild.id, "news.last_posted_ids", {}) or {}
         last_id = str(last_map.get(source_key, "") or "")
         if not force and last_id and last_id == item.id:
             return False, None
 
-        ping_text = self._build_ping_content(guild)
+        ping_text = self._build_ping_content(guild, source)
         view = build_news_view(self.settings, guild, item, ping_text=ping_text)
         msg = await channel.send(view=view)
 
@@ -144,27 +136,54 @@ class NewsService:
             pass
         return True, None
 
-    def _build_ping_content(self, guild: discord.Guild) -> str | None:
-        role_id = self.settings.get_guild_int(guild.id, "news.ping_role_id", 0)
+    async def _resolve_target_channel(self, guild: discord.Guild, source: dict | None = None):
+        src_channel_id = 0
+        if isinstance(source, dict):
+            try:
+                src_channel_id = int(source.get("channel_id") or 0)
+            except Exception:
+                src_channel_id = 0
+        channel_id = src_channel_id or self.settings.get_guild_int(guild.id, "news.channel_id", 0)
+        if not channel_id:
+            return None
+        channel = guild.get_channel(int(channel_id))
+        if channel is None:
+            try:
+                channel = await guild.fetch_channel(int(channel_id))
+            except Exception:
+                channel = None
+        if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.abc.Messageable)):
+            return None
+        return channel
+
+    def _build_ping_content(self, guild: discord.Guild, source: dict | None = None) -> str | None:
+        role_id = 0
+        if isinstance(source, dict):
+            try:
+                role_id = int(source.get("ping_role_id") or 0)
+            except Exception:
+                role_id = 0
+        if not role_id:
+            role_id = self.settings.get_guild_int(guild.id, "news.ping_role_id", 0)
         if role_id:
             return f"<@&{int(role_id)}>"
         return None
 
-    async def _fetch_latest_items(self, guild: discord.Guild) -> list[tuple[str, NewsItem]]:
+    async def _fetch_latest_items(self, guild: discord.Guild) -> list[tuple[str, NewsItem, dict | None]]:
         sources = self.settings.get_guild(guild.id, "news.sources", None)
         if not sources:
             api_url = str(self.settings.get_guild(guild.id, "news.api_url", "https://www.tagesschau.de/api2u/news") or "").strip()
             item = await self._fetch_latest_tagesschau(api_url)
-            return [("tagesschau", item)] if item else []
+            return [("tagesschau", item, None)] if item else []
 
-        results: list[tuple[str, NewsItem]] = []
+        results: list[tuple[str, NewsItem, dict | None]] = []
         for idx, src in enumerate(sources):
             if not isinstance(src, dict):
                 continue
             source_key = self._source_key(src, idx)
             item = await self._fetch_latest_source(guild, src)
             if item:
-                results.append((source_key, item))
+                results.append((source_key, item, src))
         return results
 
     def _source_key(self, src: dict, idx: int) -> str:
@@ -369,7 +388,7 @@ class NewsService:
             channel = None
             access_key = self._socialkit_access_key(guild.id)
             base_url = self._socialkit_endpoint(guild.id)
-            if access_key and link:
+            if self._youtube_stats_enabled(guild.id) and access_key and link:
                 stats = await self._fetch_youtube_stats(link, access_key, base_url)
                 channel_url = str(stats.get("channel_url") if stats else "").strip()
                 channel = await self._fetch_youtube_channel_stats(channel_url, access_key, base_url) if channel_url else None
@@ -547,6 +566,8 @@ class NewsService:
         await self.settings.set_guild_override(self.db, guild.id, "news.youtube_alerts", alerts)
 
     async def _maybe_update_youtube_stats(self, guild: discord.Guild):
+        if not self._youtube_stats_enabled(guild.id):
+            return
         access_key = self._socialkit_access_key(guild.id)
         base_url = self._socialkit_endpoint(guild.id)
         if not access_key or not base_url:
