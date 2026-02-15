@@ -22,6 +22,10 @@ from bot.modules.roles.cogs.roles_commands import RolesCommands
 from bot.modules.roles.views.roles_info_panel import RolesInfoPanelView
 from bot.modules.custom_roles.services.custom_role_service import CustomRoleService
 from bot.modules.custom_roles.cogs.custom_role_commands import CustomRoleCommands
+from bot.modules.server_guide.services.server_guide_service import ServerGuideService
+from bot.modules.server_guide.cogs.server_guide_commands import ServerGuideCommands
+from bot.modules.reminder_afk.services.reminder_afk_service import ReminderAfkService
+from bot.modules.reminder_afk.cogs.reminder_afk_commands import ReminderAfkCommands
 from bot.modules.flags.services.flag_quiz_service import FlagQuizService
 from bot.modules.flags.cogs.flag_commands import FlagCommands
 from bot.modules.flags.cogs.flag_listener import FlagListener
@@ -124,6 +128,8 @@ class StarryBot(commands.Bot):
         self.bot_status_service = BotStatusService(self, self.settings, self.logger)
         self.flag_quiz_service = FlagQuizService(self, self.settings, self.db, self.logger)
         self.custom_role_service = CustomRoleService(self, self.settings, self.db, self.logger)
+        self.server_guide_service = ServerGuideService(self, self.settings, self.logger)
+        self.reminder_afk_service = ReminderAfkService(self, self.settings, self.db, self.logger)
 
         self.forum_logs = ForumLogService(self, self.settings, self.db)
         self._boot_done = False
@@ -136,6 +142,7 @@ class StarryBot(commands.Bot):
         self.news_loop.start()
         self.placeholder_loop.start()
         self.parlament_loop.start()
+        self.reminder_loop.start()
 
     async def setup_hook(self):
         await self.add_cog(TicketDMListener(self))
@@ -149,6 +156,8 @@ class StarryBot(commands.Bot):
         await self.add_cog(BirthdayCommands(self))
         await self.add_cog(RolesCommands(self))
         await self.add_cog(CustomRoleCommands(self))
+        await self.add_cog(ServerGuideCommands(self))
+        await self.add_cog(ReminderAfkCommands(self))
         await self.add_cog(FlagListener(self))
         await self.add_cog(FlagCommands(self))
         await self.add_cog(GiveawayCommands(self))
@@ -276,6 +285,14 @@ class StarryBot(commands.Bot):
         except Exception:
             pass
 
+    @tasks.loop(seconds=20.0)
+    async def reminder_loop(self):
+        try:
+            if self.reminder_afk_service:
+                await self.reminder_afk_service.tick()
+        except Exception:
+            pass
+
     @reload_settings_loop.error
     async def reload_settings_loop_error(self, error: Exception):
             await self._emit_bot_error("reload_settings_loop", error, extra=None, guild=None)
@@ -307,6 +324,10 @@ class StarryBot(commands.Bot):
     @parlament_loop.error
     async def parlament_loop_error(self, error: Exception):
             await self._emit_bot_error("parlament_loop", error, extra=None, guild=None)
+
+    @reminder_loop.error
+    async def reminder_loop_error(self, error: Exception):
+            await self._emit_bot_error("reminder_loop", error, extra=None, guild=None)
 
 
     async def on_ready(self):

@@ -34,7 +34,9 @@ class CustomRoleCommands(commands.Cog):
 
     def _admin_max_emojis(self, guild_id: int) -> int:
         try:
-            val = int(self.bot.settings.get_guild(guild_id, "roles.custom_role.admin_max_emojis", 20) or 20)
+            val = int(self.bot.settings.get_guild(guild_id, "custom_roles.admin_max_emojis", None) or 0)
+            if val <= 0:
+                val = int(self.bot.settings.get_guild(guild_id, "roles.custom_role.admin_max_emojis", 20) or 20)
         except Exception:
             val = 20
         return max(1, min(20, val))
@@ -149,6 +151,32 @@ class CustomRoleCommands(commands.Cog):
             ephemeral=True,
         )
 
+    @custom_role.command(name="upload-emoji", description="🧩 𑁉 Eigenes Emoji hochladen und nutzen")
+    @app_commands.describe(name="Emoji-Name", image="Emoji-Bild (PNG/JPG/GIF)")
+    async def custom_role_upload_emoji(self, interaction: discord.Interaction, name: str, image: discord.Attachment):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        if not self.service.enabled(interaction.guild.id):
+            return await interaction.response.send_message("Custom-Rollen sind deaktiviert.", ephemeral=True)
+        perks = await self.service.perks(interaction.user)
+        if not perks.get("can_upload_emoji", False):
+            return await interaction.response.send_message("Emoji-Upload erst ab freigeschaltetem Level oder als Booster.", ephemeral=True)
+        data, err = await self.service.load_icon_bytes(image)
+        if err:
+            return await interaction.response.send_message(err, ephemeral=True)
+        ok, msg, token = await self.service.upload_guild_emoji(interaction.guild, interaction.user, name, data or b"")
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+
+        row = await self.bot.db.get_custom_role(interaction.guild.id, interaction.user.id)
+        if row and token:
+            emojis, cap = await self.service.read_reactions(interaction.guild.id, interaction.user.id)
+            if token not in emojis and len(emojis) < cap:
+                emojis.append(token)
+                await self.service.set_member_emojis(interaction.user, emojis, cap)
+                msg += f"\nAls Ping-Reaction hinzugefügt ({len(emojis)}/{cap})."
+        await interaction.response.send_message(msg, ephemeral=True)
+
     @custom_role.command(name="admin-grant", description="🛠️ 𑁉 Admin: Free-Custom-Rolle für User vergeben")
     @app_commands.describe(
         user="Zieluser",
@@ -242,7 +270,7 @@ class CustomRoleCommands(commands.Cog):
             return
         await self._ctx_reply(
             ctx,
-            "Verfügbar: `!customrole create <name> [#hex] [emojis]`, `!customrole emojis <emojis>`, `!customrole info`, `!customrole remove`, `!customrole admin-*`",
+            "Verfügbar: `!customrole create <name> [#hex] [emojis]`, `!customrole emojis <emojis>`, `!customrole upload-emoji <name>`, `!customrole info`, `!customrole remove`, `!customrole admin-*`",
         )
 
     @customrole_prefix.command(name="create")
@@ -316,6 +344,34 @@ class CustomRoleCommands(commands.Cog):
             f"Custom-Rolle: {role_text} | Level: {perks['level']} | Booster: {'Ja' if perks['is_booster'] else 'Nein'} | "
             f"Emoji-Limit: {perks['max_emojis']} | Emojis: {' '.join(emojis) if emojis else '—'} ({len(emojis)}/{cap})",
         )
+
+    @customrole_prefix.command(name="upload-emoji")
+    async def customrole_prefix_upload_emoji(self, ctx: commands.Context, name: str):
+        if not self._need_ctx(ctx):
+            return
+        if not isinstance(ctx.author, discord.Member):
+            return
+        if not self.service.enabled(ctx.guild.id):
+            return await self._ctx_reply(ctx, "Custom-Rollen sind deaktiviert.")
+        perks = await self.service.perks(ctx.author)
+        if not perks.get("can_upload_emoji", False):
+            return await self._ctx_reply(ctx, "Emoji-Upload erst ab freigeschaltetem Level oder als Booster.")
+        if not ctx.message.attachments:
+            return await self._ctx_reply(ctx, "Bitte ein Bild als Attachment mitschicken.")
+        data, err = await self.service.load_icon_bytes(ctx.message.attachments[0])
+        if err:
+            return await self._ctx_reply(ctx, err)
+        ok, msg, token = await self.service.upload_guild_emoji(ctx.guild, ctx.author, name, data or b"")
+        if not ok:
+            return await self._ctx_reply(ctx, msg)
+        row = await self.bot.db.get_custom_role(ctx.guild.id, ctx.author.id)
+        if row and token:
+            emojis, cap = await self.service.read_reactions(ctx.guild.id, ctx.author.id)
+            if token not in emojis and len(emojis) < cap:
+                emojis.append(token)
+                await self.service.set_member_emojis(ctx.author, emojis, cap)
+                msg += f" | Als Ping-Reaction hinzugefügt ({len(emojis)}/{cap})."
+        await self._ctx_reply(ctx, msg)
 
     @customrole_prefix.command(name="admin-grant")
     async def customrole_prefix_admin_grant(

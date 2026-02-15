@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 
 import discord
+
+_CUSTOM_EMOJI_RE = re.compile(r"^<a?:[A-Za-z0-9_]{1,32}:(\d{15,21})>$")
 
 
 class CustomRoleService:
@@ -29,11 +32,19 @@ class CustomRoleService:
             return []
         return [p.strip() for p in text.split() if p.strip()]
 
+    def _cfg(self, guild_id: int, key: str, default):
+        new_key = f"custom_roles.{key}"
+        legacy_key = f"roles.custom_role.{key}"
+        value = self.settings.get_guild(int(guild_id), new_key, None)
+        if value is not None:
+            return value
+        return self.settings.get_guild(int(guild_id), legacy_key, default)
+
     def enabled(self, guild_id: int) -> bool:
-        return self.settings.get_guild_bool(int(guild_id), "roles.custom_role.enabled", True)
+        return bool(self._cfg(int(guild_id), "enabled", True))
 
     def default_reactions(self, guild_id: int) -> list[str]:
-        raw = self.settings.get_guild(int(guild_id), "roles.custom_role.default_reactions", ["🔥", "✨", "💫"]) or []
+        raw = self._cfg(int(guild_id), "default_reactions", ["🔥", "✨", "💫"]) or []
         out: list[str] = []
         for item in raw:
             s = str(item or "").strip()
@@ -55,7 +66,7 @@ class CustomRoleService:
         level = await self.member_level(member)
         is_booster = bool(member.premium_since)
 
-        rewards = self.settings.get_guild(gid, "roles.custom_role.rewards", None) or [
+        rewards = self._cfg(gid, "rewards", None) or [
             {"min_level": 0, "max_emojis": 3},
             {"min_level": 10, "max_emojis": 5},
             {"min_level": 25, "max_emojis": 7},
@@ -77,14 +88,20 @@ class CustomRoleService:
             if level >= min_level:
                 max_emojis = amount
 
-        booster_unlock_level = int(self.settings.get_guild(gid, "roles.custom_role.booster_unlock_level", 10) or 10)
-        booster_max = int(self.settings.get_guild(gid, "roles.custom_role.booster_max_emojis", 5) or 5)
+        booster_unlock_level = int(self._cfg(gid, "booster_unlock_level", 10) or 10)
+        booster_max = int(self._cfg(gid, "booster_max_emojis", 5) or 5)
         if is_booster and max_emojis < booster_max:
             max_emojis = booster_max
 
-        icon_unlock_level = int(self.settings.get_guild(gid, "roles.custom_role.icon_unlock_level", 10) or 10)
-        booster_unlocks_icon = bool(self.settings.get_guild(gid, "roles.custom_role.booster_unlocks_icon", True))
+        icon_unlock_level = int(self._cfg(gid, "icon_unlock_level", 10) or 10)
+        booster_unlocks_icon = bool(self._cfg(gid, "booster_unlocks_icon", True))
         can_icon = bool(level >= icon_unlock_level or (is_booster and booster_unlocks_icon))
+
+        emoji_upload_unlock_level = int(self._cfg(gid, "emoji_upload_unlock_level", 10) or 10)
+        allow_user_emoji_upload = bool(self._cfg(gid, "allow_user_emoji_upload", True))
+        can_upload_emoji = bool(
+            allow_user_emoji_upload and (level >= emoji_upload_unlock_level or is_booster)
+        )
 
         return {
             "level": int(level),
@@ -92,7 +109,37 @@ class CustomRoleService:
             "max_emojis": max(1, min(20, int(max_emojis))),
             "can_icon": can_icon,
             "booster_unlock_level": int(booster_unlock_level),
+            "can_upload_emoji": bool(can_upload_emoji),
         }
+
+    @staticmethod
+    def _emoji_id(token: str) -> int | None:
+        m = _CUSTOM_EMOJI_RE.match(str(token or "").strip())
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    def sanitize_emojis(self, guild: discord.Guild, emojis: list[str], max_emojis: int) -> tuple[list[str], list[str]]:
+        valid: list[str] = []
+        invalid: list[str] = []
+        for token in emojis:
+            t = str(token or "").strip()
+            if not t:
+                continue
+            eid = self._emoji_id(t)
+            if eid is not None:
+                e = guild.get_emoji(int(eid))
+                if e is None:
+                    invalid.append(t)
+                    continue
+                valid.append(str(e))
+                continue
+            valid.append(t)
+        out = valid[: max(1, min(20, int(max_emojis)))]
+        return out, invalid
 
     async def load_icon_bytes(self, icon: discord.Attachment | None) -> tuple[bytes | None, str | None]:
         if not icon:
@@ -168,19 +215,21 @@ class CustomRoleService:
             except Exception:
                 pass
 
+        cleaned, invalid = self.sanitize_emojis(guild, emojis, max_emojis)
         try:
             await self.db.upsert_custom_role(
                 guild.id,
                 member.id,
                 int(role.id),
                 str(role.name),
-                json.dumps(emojis[:max_emojis], ensure_ascii=False),
+                json.dumps(cleaned, ensure_ascii=False),
                 int(max_emojis),
             )
         except Exception as e:
             return False, f"Speichern fehlgeschlagen: `{type(e).__name__}`"
-
-        return True, f"Custom-Rolle aktiv: {role.mention} | Emojis: **{len(emojis[:max_emojis])}/{max_emojis}**"
+        if invalid:
+            return True, f"Custom-Rolle aktiv: {role.mention} | Emojis: **{len(cleaned)}/{max_emojis}** (ignoriert: {len(invalid)})"
+        return True, f"Custom-Rolle aktiv: {role.mention} | Emojis: **{len(cleaned)}/{max_emojis}**"
 
     async def set_member_emojis(self, member: discord.Member, emojis: list[str], max_emojis: int) -> tuple[bool, str]:
         row = await self.db.get_custom_role(member.guild.id, member.id)
@@ -193,18 +242,21 @@ class CustomRoleService:
             role_name = str(row[3] or "Custom Role")
         except Exception:
             return False, "Dein gespeicherter Custom-Role-Datensatz ist ungültig."
+        cleaned, invalid = self.sanitize_emojis(member.guild, emojis, max_emojis)
         try:
             await self.db.upsert_custom_role(
                 member.guild.id,
                 member.id,
                 role_id,
                 role_name,
-                json.dumps(emojis[:max_emojis], ensure_ascii=False),
+                json.dumps(cleaned, ensure_ascii=False),
                 int(max_emojis),
             )
         except Exception as e:
             return False, f"Speichern fehlgeschlagen: `{type(e).__name__}`"
-        return True, f"Reaktions-Emojis gesetzt: **{len(emojis[:max_emojis])}/{max_emojis}**"
+        if invalid:
+            return True, f"Reaktions-Emojis gesetzt: **{len(cleaned)}/{max_emojis}** (ignoriert: {len(invalid)})"
+        return True, f"Reaktions-Emojis gesetzt: **{len(cleaned)}/{max_emojis}**"
 
     async def read_reactions(self, guild_id: int, user_id: int) -> tuple[list[str], int]:
         row = await self.db.get_custom_role(int(guild_id), int(user_id))
@@ -241,3 +293,19 @@ class CustomRoleService:
                 pass
         await self.db.delete_custom_role(member.guild.id, member.id)
         return True, "Deine Custom-Rolle wurde entfernt."
+
+    async def upload_guild_emoji(self, guild: discord.Guild, actor: discord.Member, name: str, image: bytes) -> tuple[bool, str, str | None]:
+        if not guild.me or not guild.me.guild_permissions.manage_emojis_and_stickers:
+            return False, "Bot braucht `Manage Emojis and Stickers`.", None
+        safe_name = re.sub(r"[^A-Za-z0-9_]", "", str(name or "").strip())[:32]
+        if len(safe_name) < 2:
+            return False, "Emoji-Name ist ungültig (mind. 2 Zeichen, nur A-Z 0-9 _).", None
+        try:
+            emoji = await guild.create_custom_emoji(
+                name=safe_name,
+                image=image,
+                reason=f"Custom role emoji upload by {actor.id}",
+            )
+        except Exception as e:
+            return False, f"Emoji-Upload fehlgeschlagen: `{type(e).__name__}`", None
+        return True, f"Emoji hochgeladen: {emoji}", str(emoji)

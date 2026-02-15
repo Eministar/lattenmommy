@@ -369,6 +369,28 @@ class Database:
         );
         """)
         await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS afk_status (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            reason TEXT,
+            set_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            remind_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            delivered_at TEXT
+        );
+        """)
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(delivered_at, remind_at)")
+        await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS achievements (
             guild_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -2578,6 +2600,114 @@ class Database:
             (int(guild_id), int(user_id)),
         )
         await self._conn.commit()
+
+    async def set_afk_status(self, guild_id: int, user_id: int, reason: str | None):
+        set_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO afk_status (guild_id, user_id, reason, set_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                reason = excluded.reason,
+                set_at = excluded.set_at;
+            """,
+            (int(guild_id), int(user_id), str(reason).strip() if reason else None, set_at),
+        )
+        await self._conn.commit()
+
+    async def clear_afk_status(self, guild_id: int, user_id: int):
+        await self._conn.execute(
+            "DELETE FROM afk_status WHERE guild_id = ? AND user_id = ?;",
+            (int(guild_id), int(user_id)),
+        )
+        await self._conn.commit()
+
+    async def get_afk_status(self, guild_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, user_id, reason, set_at
+            FROM afk_status
+            WHERE guild_id = ? AND user_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(user_id)),
+        )
+        return await cur.fetchone()
+
+    async def list_afk_status_for_users(self, guild_id: int, user_ids: list[int]):
+        clean = [int(u) for u in user_ids if int(u) > 0]
+        if not clean:
+            return []
+        placeholders = ",".join(["?"] * len(clean))
+        cur = await self._conn.execute(
+            f"""
+            SELECT guild_id, user_id, reason, set_at
+            FROM afk_status
+            WHERE guild_id = ? AND user_id IN ({placeholders});
+            """,
+            (int(guild_id), *clean),
+        )
+        return await cur.fetchall()
+
+    async def create_reminder(self, guild_id: int, user_id: int, channel_id: int, message: str, remind_at: str):
+        created_at = await self.now_iso()
+        cur = await self._conn.execute(
+            """
+            INSERT INTO reminders (guild_id, user_id, channel_id, message, remind_at, created_at, delivered_at)
+            VALUES (?, ?, ?, ?, ?, ?, NULL);
+            """,
+            (int(guild_id), int(user_id), int(channel_id), str(message), str(remind_at), created_at),
+        )
+        await self._conn.commit()
+        return int(getattr(cur, "lastrowid", 0) or 0)
+
+    async def list_due_reminders(self, now_iso: str, limit: int = 50):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, user_id, channel_id, message, remind_at, created_at, delivered_at
+            FROM reminders
+            WHERE delivered_at IS NULL AND remind_at <= ?
+            ORDER BY remind_at ASC
+            LIMIT ?;
+            """,
+            (str(now_iso), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def mark_reminder_delivered(self, reminder_id: int):
+        delivered_at = await self.now_iso()
+        await self._conn.execute(
+            "UPDATE reminders SET delivered_at = ? WHERE id = ?;",
+            (str(delivered_at), int(reminder_id)),
+        )
+        await self._conn.commit()
+
+    async def list_active_reminders_for_user(self, guild_id: int, user_id: int, limit: int = 20):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, user_id, channel_id, message, remind_at, created_at, delivered_at
+            FROM reminders
+            WHERE guild_id = ? AND user_id = ? AND delivered_at IS NULL
+            ORDER BY remind_at ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(user_id), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def delete_active_reminder(self, guild_id: int, user_id: int, reminder_id: int) -> bool:
+        cur = await self._conn.execute(
+            """
+            DELETE FROM reminders
+            WHERE id = ? AND guild_id = ? AND user_id = ? AND delivered_at IS NULL;
+            """,
+            (int(reminder_id), int(guild_id), int(user_id)),
+        )
+        await self._conn.commit()
+        try:
+            return int(cur.rowcount or 0) > 0
+        except Exception:
+            return False
 
     async def set_flag_quiz_channel(self, guild_id: int, channel_id: int | None):
         now = await self.now_iso()
