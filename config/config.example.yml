@@ -361,6 +361,47 @@ achievements:
 roles:
   announce_channel_id: 0
 
+custom_roles:
+  enabled: true
+  admin_max_emojis: 20
+  icon_unlock_level: 10
+  booster_unlock_level: 10
+  booster_max_emojis: 5
+  booster_unlocks_icon: true
+  allow_user_emoji_upload: true
+  emoji_upload_unlock_level: 10
+  default_reactions: ["🔥", "✨", "💫"]
+  rewards:
+    - min_level: 0
+      max_emojis: 3
+    - min_level: 10
+      max_emojis: 5
+    - min_level: 25
+      max_emojis: 7
+
+server_guide:
+  enabled: true
+  forum_channel_id: 0
+  exclude_modules: ["backup", "logs"]
+  exclude_command_keywords:
+    - "admin"
+    - "setup"
+    - "sync"
+    - "rescan"
+    - "debug"
+    - "backup"
+    - "build"
+    - "panel-senden"
+    - "mass-add"
+    - "grant"
+    - "revoke"
+
+reminder_afk:
+  enabled: true
+  max_days: 365
+  afk_notice_cooldown_seconds: 25
+  afk_set_grace_seconds: 6
+
 giveaway:
   enabled: true
   join_emoji: "🎉"
