@@ -45,20 +45,43 @@ class ReminderAfkCommands(commands.Cog):
         ok, msg = await self.service.remove_reminder(interaction.guild.id, interaction.user.id, int(reminder_id))
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @app_commands.command(name="afk", description="💤 𑁉 AFK setzen")
-    @app_commands.describe(reason="Optionaler AFK-Grund")
-    async def afk(self, interaction: discord.Interaction, reason: str | None = None):
+    @app_commands.command(name="afk", description="💤 𑁉 AFK setzen (mit optionaler Zeit)")
+    @app_commands.describe(reason="Optionaler AFK-Grund", time="Optional: z.B. 30m, 2h, 1d")
+    async def afk(self, interaction: discord.Interaction, reason: str | None = None, time: str | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
-        msg = await self.service.set_afk(interaction.user, reason)
-        await interaction.response.send_message(msg, ephemeral=True)
+        ok, msg, view = await self.service.set_afk(interaction.user, reason, time)
+        if not ok:
+            return await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_message(msg, ephemeral=True, view=view)
 
-    @app_commands.command(name="unafk", description="✅ 𑁉 AFK manuell entfernen")
+    @app_commands.command(name="afk-status", description="📊 𑁉 Zeigt deinen aktuellen AFK-Status")
+    async def afk_status(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        row = await self.bot.db.get_afk_status(interaction.guild.id, interaction.user.id)
+        if not row:
+            return await interaction.response.send_message("Du bist aktuell nicht AFK.", ephemeral=True)
+        reason = str(row[2] or "AFK")
+        set_at = str(row[3] or "")
+        until_at = str(row[4] or "")
+        events = await self.bot.db.list_afk_mention_events(interaction.guild.id, interaction.user.id, limit=1000)
+        lines = [
+            f"Grund: **{reason}**",
+            f"Seit: `{set_at or '—'}`",
+            f"Bis: `{until_at or '—'}`",
+            f"Erwähnungen: **{len(events)}**",
+        ]
+        await interaction.response.send_message("**AFK Status**\n" + "\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="unafk", description="✅ 𑁉 AFK manuell entfernen + Zusammenfassung")
     async def unafk(self, interaction: discord.Interaction):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
-        await self.service.clear_afk(interaction.guild.id, interaction.user.id)
-        await interaction.response.send_message("AFK entfernt.", ephemeral=True)
+        ok, view = await self.service.clear_afk_with_summary(interaction.guild, interaction.user)
+        if not ok:
+            return await interaction.response.send_message("Du bist nicht AFK.", ephemeral=True)
+        await interaction.response.send_message("AFK entfernt.", ephemeral=True, view=view)
 
     @commands.group(name="reminder", invoke_without_command=True)
     async def reminder_prefix(self, ctx: commands.Context):
@@ -90,15 +113,43 @@ class ReminderAfkCommands(commands.Cog):
         await ctx.reply(msg, mention_author=False)
 
     @commands.command(name="afk")
-    async def afk_prefix(self, ctx: commands.Context, *, reason: str | None = None):
+    async def afk_prefix(self, ctx: commands.Context, *, payload: str | None = None):
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return
-        msg = await self.service.set_afk(ctx.author, reason)
+        text = str(payload or "").strip()
+        time = None
+        reason = None
+        if text:
+            parts = text.split(" ", 1)
+            if self.service._parse_duration(parts[0]):
+                time = parts[0]
+                reason = parts[1] if len(parts) > 1 else None
+            else:
+                reason = text
+        ok, msg, _ = await self.service.set_afk(ctx.author, reason, time)
         await ctx.reply(msg, mention_author=False)
+
+    @commands.command(name="afkstatus")
+    async def afkstatus_prefix(self, ctx: commands.Context):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return
+        row = await self.bot.db.get_afk_status(ctx.guild.id, ctx.author.id)
+        if not row:
+            return await ctx.reply("Du bist aktuell nicht AFK.", mention_author=False)
+        reason = str(row[2] or "AFK")
+        set_at = str(row[3] or "")
+        until_at = str(row[4] or "")
+        events = await self.bot.db.list_afk_mention_events(ctx.guild.id, ctx.author.id, limit=1000)
+        await ctx.reply(
+            f"AFK aktiv | Grund: **{reason}** | Seit: `{set_at or '—'}` | Bis: `{until_at or '—'}` | Erwähnungen: **{len(events)}**",
+            mention_author=False,
+        )
 
     @commands.command(name="unafk")
     async def unafk_prefix(self, ctx: commands.Context):
         if not ctx.guild or not isinstance(ctx.author, discord.Member):
             return
-        await self.service.clear_afk(ctx.guild.id, ctx.author.id)
-        await ctx.reply("AFK entfernt.", mention_author=False)
+        ok, _ = await self.service.clear_afk_with_summary(ctx.guild, ctx.author)
+        if not ok:
+            return await ctx.reply("Du bist nicht AFK.", mention_author=False)
+        await ctx.reply("AFK entfernt. Willkommen zurück.", mention_author=False)

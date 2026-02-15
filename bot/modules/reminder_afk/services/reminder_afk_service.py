@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -15,12 +16,18 @@ class ReminderAfkService:
         self.settings = settings
         self.db = db
         self.logger = logger
-        self._afk_mention_notice_cache: dict[tuple[int, int, int], float] = {}
+        self._afk_notice_cache: dict[tuple[int, int, int], float] = {}
 
     def enabled(self, guild_id: int) -> bool:
         return bool(self.settings.get_guild(guild_id, "reminder_afk.enabled", True))
 
-    def _parse_duration(self, text: str) -> int | None:
+    def _afk_notice_cooldown(self, guild_id: int) -> int:
+        try:
+            return max(5, int(self.settings.get_guild(guild_id, "reminder_afk.afk_notice_cooldown_seconds", 25) or 25))
+        except Exception:
+            return 25
+
+    def _parse_duration(self, text: str | None) -> int | None:
         raw = str(text or "").strip().lower()
         if not raw:
             return None
@@ -45,13 +52,112 @@ class ReminderAfkService:
         max_days = int(self.settings.get("reminder_afk.max_days", 365) or 365)
         return max(1, min(total, max_days * 86400))
 
-    async def set_afk(self, member: discord.Member, reason: str | None) -> str:
-        text = (reason or "AFK").strip()[:180]
-        await self.db.set_afk_status(member.guild.id, member.id, text)
-        return f"Du bist jetzt AFK: **{text}**"
+    def _color(self, guild: discord.Guild | None) -> int:
+        try:
+            val = self.settings.get_guild(guild.id, "design.accent_color", "#B16B91") if guild else self.settings.get("design.accent_color", "#B16B91")
+            return int(str(val).replace("#", ""), 16)
+        except Exception:
+            return 0xB16B91
+
+    def _container_view(self, guild: discord.Guild | None, title: str, blocks: list[str]) -> discord.ui.LayoutView:
+        view = discord.ui.LayoutView(timeout=None)
+        c = discord.ui.Container(accent_colour=self._color(guild))
+        c.add_item(discord.ui.TextDisplay(f"**{title}**"))
+        for i, b in enumerate(blocks):
+            if i > 0:
+                c.add_item(discord.ui.Separator())
+            c.add_item(discord.ui.TextDisplay(str(b)[:1900]))
+        view.add_item(c)
+        return view
+
+    async def set_afk(self, member: discord.Member, reason: str | None, time_text: str | None = None) -> tuple[bool, str, discord.ui.LayoutView | None]:
+        text = (reason or "AFK").strip()[:220]
+        until_at = None
+        if time_text:
+            sec = self._parse_duration(time_text)
+            if not sec:
+                return False, "Zeitformat ungültig. Beispiele: `10m`, `2h`, `1d12h`, `45s`.", None
+            until_at = (datetime.now(timezone.utc) + timedelta(seconds=int(sec))).isoformat()
+        await self.db.set_afk_status(member.guild.id, member.id, text, until_at=until_at)
+        await self.db.clear_afk_mention_events(member.guild.id, member.id)
+
+        set_at = datetime.now(timezone.utc)
+        lines = [
+            f"┏`👤` - User: {member.mention}",
+            f"┣`💬` - Grund: **{text}**",
+            f"┣`🕒` - Start: {format_dt(set_at, style='R')}",
+        ]
+        if until_at:
+            try:
+                dt = datetime.fromisoformat(until_at)
+                lines.append(f"┗`⏳` - Ende: {format_dt(dt, style='R')} ({format_dt(dt, style='f')})")
+            except Exception:
+                lines.append("┗`⏳` - Ende: gesetzt")
+        else:
+            lines.append("┗`⏳` - Ende: manuell oder bei nächster Nachricht")
+        view = self._container_view(member.guild, "💤 𑁉 AFK AKTIV", ["\n".join(lines)])
+        return True, "AFK gesetzt.", view
 
     async def clear_afk(self, guild_id: int, user_id: int):
         await self.db.clear_afk_status(guild_id, user_id)
+
+    async def clear_afk_with_summary(self, guild: discord.Guild, user: discord.Member) -> tuple[bool, discord.ui.LayoutView | None]:
+        row = await self.db.get_afk_status(guild.id, user.id)
+        if not row:
+            return False, None
+        set_at = str(row[3] or "")
+        events = await self.db.list_afk_mention_events(guild.id, user.id, limit=600)
+        await self.db.clear_afk_status(guild.id, user.id)
+        await self.db.clear_afk_mention_events(guild.id, user.id)
+
+        now = datetime.now(timezone.utc)
+        duration_text = "unbekannt"
+        try:
+            started = datetime.fromisoformat(set_at)
+            duration_text = format_dt(started, style='R')
+            total_seconds = max(0, int((now - started).total_seconds()))
+        except Exception:
+            total_seconds = 0
+
+        total_mentions = len(events)
+        pingers = Counter(int(e[3]) for e in events)
+        channels = {int(e[4]) for e in events}
+        top = pingers.most_common(5)
+
+        top_lines = []
+        for uid, cnt in top:
+            top_lines.append(f"• <@{uid}> — **{cnt}x**")
+        if not top_lines:
+            top_lines = ["• Niemand hat dich erwähnt."]
+
+        recent_lines = []
+        for e in events[-5:]:
+            ch_id = int(e[4])
+            msg_id = int(e[5])
+            created = str(e[6] or "")
+            when = ""
+            try:
+                when = format_dt(datetime.fromisoformat(created), style='R')
+            except Exception:
+                pass
+            link = f"https://discord.com/channels/{guild.id}/{ch_id}/{msg_id}"
+            recent_lines.append(f"• {when or '—'} in <#{ch_id}> • [Jump]({link})")
+        if not recent_lines:
+            recent_lines = ["• Keine letzten Erwähnungen vorhanden."]
+
+        summary = [
+            f"┏`👋` - Willkommen zurück {user.mention}",
+            f"┣`🕒` - AFK seit: {duration_text}",
+            f"┣`⏱️` - Dauer: **{total_seconds // 60}m {total_seconds % 60}s**",
+            f"┣`🔔` - Erwähnungen: **{total_mentions}**",
+            f"┗`🧭` - Kanäle: **{len(channels)}**",
+        ]
+        view = self._container_view(
+            guild,
+            "✅ 𑁉 AFK ENTFERNT · ZUSAMMENFASSUNG",
+            ["\n".join(summary), "**Top-Pinger**\n" + "\n".join(top_lines), "**Letzte Erwähnungen**\n" + "\n".join(recent_lines)],
+        )
+        return True, view
 
     async def create_reminder(self, guild: discord.Guild, user: discord.Member, channel_id: int, when_text: str, text: str) -> tuple[bool, str]:
         seconds = self._parse_duration(when_text)
@@ -86,7 +192,18 @@ class ReminderAfkService:
             return False, "Reminder nicht gefunden oder schon erledigt."
         return True, f"Reminder `#{int(reminder_id)}` gelöscht."
 
+    async def _tick_expired_afk(self):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        rows = await self.db.list_expired_afk_status(now_iso, limit=50)
+        for row in rows:
+            gid = int(row[0])
+            uid = int(row[1])
+            await self.db.clear_afk_status(gid, uid)
+            # Events behalten wir, damit bei nächster Nachricht eine echte Summary kommen kann.
+
     async def tick(self):
+        await self._tick_expired_afk()
+
         now = datetime.now(timezone.utc).isoformat()
         rows = await self.db.list_due_reminders(now, limit=50)
         for r in rows:
@@ -136,18 +253,12 @@ class ReminderAfkService:
 
         author_afk = await self.db.get_afk_status(message.guild.id, message.author.id)
         if author_afk:
-            await self.db.clear_afk_status(message.guild.id, message.author.id)
-            set_at = str(author_afk[3] or "")
-            back = "Willkommen zurück, AFK wurde entfernt."
-            try:
-                dt = datetime.fromisoformat(set_at)
-                back = f"Willkommen zurück {message.author.mention}, AFK wurde entfernt (seit {format_dt(dt, style='R')})."
-            except Exception:
-                pass
-            try:
-                await message.reply(back, mention_author=False)
-            except Exception:
-                pass
+            ok, summary_view = await self.clear_afk_with_summary(message.guild, message.author)
+            if ok and summary_view:
+                try:
+                    await message.reply(view=summary_view, mention_author=False)
+                except Exception:
+                    pass
 
         mentions = [m for m in (message.mentions or []) if isinstance(m, discord.Member) and not m.bot and m.id != message.author.id]
         if not mentions:
@@ -157,27 +268,52 @@ class ReminderAfkService:
         if not rows:
             return
 
-        now_ts = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(timezone.utc)
+        now_ts = now.timestamp()
+        cooldown = self._afk_notice_cooldown(message.guild.id)
         lines = []
         for row in rows:
             uid = int(row[1])
             reason = str(row[2] or "AFK")
             set_at = str(row[3] or "")
+            until_at = str(row[4] or "")
+
+            # Expired timed AFK: clear silently.
+            if until_at:
+                try:
+                    until_dt = datetime.fromisoformat(until_at)
+                    if until_dt <= now:
+                        await self.db.clear_afk_status(message.guild.id, uid)
+                        continue
+                except Exception:
+                    pass
+
+            await self.db.add_afk_mention_event(message.guild.id, uid, message.author.id, message.channel.id, message.id)
+
             key = (int(message.channel.id), int(message.author.id), uid)
-            last = float(self._afk_mention_notice_cache.get(key, 0.0) or 0.0)
-            if now_ts - last < 25:
+            last = float(self._afk_notice_cache.get(key, 0.0) or 0.0)
+            if now_ts - last < cooldown:
                 continue
-            self._afk_mention_notice_cache[key] = now_ts
+            self._afk_notice_cache[key] = now_ts
+
             when = ""
             try:
                 dt = datetime.fromisoformat(set_at)
-                when = f" (seit {format_dt(dt, style='R')})"
+                when = f"seit {format_dt(dt, style='R')}"
             except Exception:
                 pass
-            lines.append(f"• <@{uid}> ist AFK{when}: **{reason[:120]}**")
+            until_txt = ""
+            if until_at:
+                try:
+                    dt_u = datetime.fromisoformat(until_at)
+                    until_txt = f" • Ende {format_dt(dt_u, style='R')}"
+                except Exception:
+                    pass
+            lines.append(f"• <@{uid}> ist AFK ({when}){until_txt}\n┗ Grund: **{reason[:160]}**")
 
         if lines:
             try:
-                await message.reply("\n".join(lines), mention_author=False)
+                view = self._container_view(message.guild, "💤 𑁉 AFK INFO", ["\n".join(lines)])
+                await message.reply(view=view, mention_author=False)
             except Exception:
                 pass

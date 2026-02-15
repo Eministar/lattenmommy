@@ -374,9 +374,23 @@ class Database:
             user_id INTEGER NOT NULL,
             reason TEXT,
             set_at TEXT NOT NULL,
+            until_at TEXT,
             PRIMARY KEY (guild_id, user_id)
         );
         """)
+        await self._ensure_column("afk_status", "until_at", "TEXT")
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS afk_mention_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            afk_user_id INTEGER NOT NULL,
+            pinger_user_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """)
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_afk_mentions_user ON afk_mention_events(guild_id, afk_user_id)")
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS reminders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2604,17 +2618,18 @@ class Database:
         )
         await self._conn.commit()
 
-    async def set_afk_status(self, guild_id: int, user_id: int, reason: str | None):
+    async def set_afk_status(self, guild_id: int, user_id: int, reason: str | None, until_at: str | None = None):
         set_at = await self.now_iso()
         await self._conn.execute(
             """
-            INSERT INTO afk_status (guild_id, user_id, reason, set_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO afk_status (guild_id, user_id, reason, set_at, until_at)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(guild_id, user_id) DO UPDATE SET
                 reason = excluded.reason,
-                set_at = excluded.set_at;
+                set_at = excluded.set_at,
+                until_at = excluded.until_at;
             """,
-            (int(guild_id), int(user_id), str(reason).strip() if reason else None, set_at),
+            (int(guild_id), int(user_id), str(reason).strip() if reason else None, set_at, str(until_at) if until_at else None),
         )
         await self._conn.commit()
 
@@ -2628,7 +2643,7 @@ class Database:
     async def get_afk_status(self, guild_id: int, user_id: int):
         cur = await self._conn.execute(
             """
-            SELECT guild_id, user_id, reason, set_at
+            SELECT guild_id, user_id, reason, set_at, until_at
             FROM afk_status
             WHERE guild_id = ? AND user_id = ?
             LIMIT 1;
@@ -2644,13 +2659,76 @@ class Database:
         placeholders = ",".join(["?"] * len(clean))
         cur = await self._conn.execute(
             f"""
-            SELECT guild_id, user_id, reason, set_at
+            SELECT guild_id, user_id, reason, set_at, until_at
             FROM afk_status
             WHERE guild_id = ? AND user_id IN ({placeholders});
             """,
             (int(guild_id), *clean),
         )
         return await cur.fetchall()
+
+    async def list_expired_afk_status(self, now_iso: str, limit: int = 50):
+        cur = await self._conn.execute(
+            """
+            SELECT guild_id, user_id, reason, set_at, until_at
+            FROM afk_status
+            WHERE until_at IS NOT NULL AND until_at <= ?
+            ORDER BY until_at ASC
+            LIMIT ?;
+            """,
+            (str(now_iso), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def add_afk_mention_event(
+        self,
+        guild_id: int,
+        afk_user_id: int,
+        pinger_user_id: int,
+        channel_id: int,
+        message_id: int,
+    ):
+        created_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO afk_mention_events (
+                guild_id, afk_user_id, pinger_user_id, channel_id, message_id, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (
+                int(guild_id),
+                int(afk_user_id),
+                int(pinger_user_id),
+                int(channel_id),
+                int(message_id),
+                str(created_at),
+            ),
+        )
+        await self._conn.commit()
+
+    async def list_afk_mention_events(self, guild_id: int, afk_user_id: int, limit: int = 500):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, afk_user_id, pinger_user_id, channel_id, message_id, created_at
+            FROM afk_mention_events
+            WHERE guild_id = ? AND afk_user_id = ?
+            ORDER BY id ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), int(afk_user_id), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def clear_afk_mention_events(self, guild_id: int, afk_user_id: int):
+        await self._conn.execute(
+            """
+            DELETE FROM afk_mention_events
+            WHERE guild_id = ? AND afk_user_id = ?;
+            """,
+            (int(guild_id), int(afk_user_id)),
+        )
+        await self._conn.commit()
 
     async def create_reminder(self, guild_id: int, user_id: int, channel_id: int, message: str, remind_at: str):
         created_at = await self.now_iso()
