@@ -39,6 +39,47 @@ class ServerGuideService:
     def _pretty_title(key: str) -> str:
         return str(key).replace("_", " ").strip().title()
 
+    def _exclude_modules(self, guild_id: int) -> set[str]:
+        base = {
+            "backup",
+            "logs",
+        }
+        raw = self.settings.get_guild(guild_id, "server_guide.exclude_modules", []) or []
+        for item in raw:
+            s = str(item or "").strip().lower()
+            if s:
+                base.add(s)
+        return base
+
+    def _exclude_keywords(self, guild_id: int) -> list[str]:
+        raw = self.settings.get_guild(
+            guild_id,
+            "server_guide.exclude_command_keywords",
+            [
+                "admin",
+                "setup",
+                "sync",
+                "rescan",
+                "debug",
+                "backup",
+                "build",
+                "panel-senden",
+                "mass-add",
+                "grant",
+                "revoke",
+            ],
+        ) or []
+        out: list[str] = []
+        for item in raw:
+            s = str(item or "").strip().lower()
+            if s:
+                out.append(s)
+        return out
+
+    def _is_admin_command(self, text: str, keywords: list[str]) -> bool:
+        low = str(text or "").lower()
+        return any(k in low for k in keywords)
+
     def _walk_app(self, node: Any, prefix: str = "") -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         if isinstance(node, app_commands.Group):
@@ -60,12 +101,14 @@ class ServerGuideService:
         sig = str(cmd.signature or "").strip()
         return f"!{name}{(' ' + sig) if sig else ''}"
 
-    def collect_module_guides(self) -> list[ModuleGuide]:
+    def collect_module_guides(self, guild_id: int) -> list[ModuleGuide]:
         by_module: dict[str, list[str]] = {}
+        excluded_modules = self._exclude_modules(guild_id)
+        excluded_keywords = self._exclude_keywords(guild_id)
 
         for cog in self.bot.cogs.values():
             key = self._module_key_from_path(getattr(cog, "__module__", ""))
-            if key in {"logs"}:
+            if key in excluded_modules:
                 continue
             lines = by_module.setdefault(key, [])
 
@@ -75,6 +118,8 @@ class ServerGuideService:
                 app_nodes = []
             for node in app_nodes:
                 for cmd_path, desc in self._walk_app(node):
+                    if self._is_admin_command(cmd_path, excluded_keywords):
+                        continue
                     lines.append(f"• `{cmd_path}`{(' — ' + desc) if desc else ''}")
 
             try:
@@ -85,6 +130,8 @@ class ServerGuideService:
                 if cmd.hidden:
                     continue
                 usage = self._prefix_usage(cmd)
+                if self._is_admin_command(usage, excluded_keywords):
+                    continue
                 desc = str(cmd.help or cmd.brief or "").strip()
                 lines.append(f"• `{usage}`{(' — ' + desc) if desc else ''}")
 
@@ -133,7 +180,7 @@ class ServerGuideService:
         if not isinstance(forum, discord.ForumChannel):
             return False, "Der Guide-Kanal muss ein Forum sein."
 
-        guides = self.collect_module_guides()
+        guides = self.collect_module_guides(guild.id)
         if not guides:
             return False, "Keine Module/Commands gefunden."
 
