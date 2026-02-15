@@ -45,6 +45,8 @@ class CustomRoleCommands(commands.Cog):
     async def on_message(self, message: discord.Message):
         if not message.guild or message.author.bot:
             return
+        if message.reference is not None or message.type == discord.MessageType.reply:
+            return
         if not self.service.enabled(message.guild.id):
             return
         if message.mention_everyone or message.role_mentions:
