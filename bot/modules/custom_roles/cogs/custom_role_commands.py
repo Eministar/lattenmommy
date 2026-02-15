@@ -54,12 +54,28 @@ class CustomRoleCommands(commands.Cog):
         if not mentions:
             return
 
-        emojis, _ = await self.service.read_reactions(message.guild.id, message.author.id)
-        if not emojis:
+        reaction_tokens: list[str] = []
+        seen: set[str] = set()
+        for target in mentions:
+            emojis, _ = await self.service.read_reactions(message.guild.id, target.id)
+            if not emojis:
+                continue
+            for token in emojis:
+                if token in seen:
+                    continue
+                seen.add(token)
+                reaction_tokens.append(token)
+                if len(reaction_tokens) >= 20:
+                    break
+            if len(reaction_tokens) >= 20:
+                break
+
+        if not reaction_tokens:
             return
-        for e in emojis:
+
+        for token in reaction_tokens:
             try:
-                await message.add_reaction(e)
+                await message.add_reaction(token)
             except Exception:
                 continue
 
