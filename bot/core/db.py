@@ -664,7 +664,7 @@ class Database:
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS flag_quiz_flags (
             guild_id INTEGER NOT NULL,
-            country_code TEXT NOT NULL,
+            country_code VARCHAR(8) NOT NULL,
             asked INTEGER NOT NULL DEFAULT 0,
             correct INTEGER NOT NULL DEFAULT 0,
             wrong INTEGER NOT NULL DEFAULT 0,
