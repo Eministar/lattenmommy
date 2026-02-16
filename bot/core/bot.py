@@ -99,8 +99,27 @@ class StarryBot(commands.Bot):
         intents.dm_messages = True
         intents.guild_messages = True
 
+        raw_prefixes = settings.get("bot.prefixes", ["!", "*"]) or ["!", "*"]
+        if isinstance(raw_prefixes, str):
+            prefixes = [raw_prefixes]
+        else:
+            try:
+                prefixes = [str(x).strip() for x in raw_prefixes if str(x).strip()]
+            except Exception:
+                prefixes = ["!", "*"]
+        if not prefixes:
+            prefixes = ["!", "*"]
+        seen = set()
+        uniq = []
+        for p in prefixes:
+            if p in seen:
+                continue
+            seen.add(p)
+            uniq.append(p)
+        self.prefixes = uniq
+
         super().__init__(
-            command_prefix=commands.when_mentioned_or("!"),
+            command_prefix=commands.when_mentioned_or(*self.prefixes),
             intents=intents
         )
 

@@ -226,3 +226,28 @@ def build_case_reason_updated_embed(
     emb.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
     _footer(emb, settings, guild)
     return emb
+
+
+def build_channel_access_embed(
+    settings,
+    guild: discord.Guild,
+    moderator: discord.Member,
+    channel: discord.TextChannel,
+    mode: str,
+    locked: bool,
+):
+    icon = "🔒" if locked else "🔓"
+    title = "CHANNEL LOCK" if locked else "CHANNEL UNLOCK"
+    mode_label = {"send": "Schreiben", "view": "Sehen", "all": "Schreiben + Sehen"}.get(str(mode), "Schreiben + Sehen")
+    arrow2 = em(settings, "arrow2", guild) or "»"
+    desc = (
+        f"{arrow2} Channel-Rechte wurden aktualisiert.\n\n"
+        f"┏`📍` - Kanal: {channel.mention} ({channel.id})\n"
+        f"┣`🧩` - Modus: **{mode_label}**\n"
+        f"┣`🧑‍⚖️` - Moderator: {moderator.mention}\n"
+        f"┗`⚙️` - Status: **{'Gesperrt' if locked else 'Entsperrt'}**"
+    )
+    emb = discord.Embed(title=f"{icon} 𑁉 {title}", description=desc, color=_color(settings, guild))
+    emb.set_author(name=moderator.display_name, icon_url=moderator.display_avatar.url)
+    _footer(emb, settings, guild)
+    return emb

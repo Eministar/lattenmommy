@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from bot.core.perms import is_staff
 from bot.modules.moderation.services.mod_service import ModerationService
+from bot.modules.moderation.formatting.moderation_embeds import build_channel_access_embed
 
 
 async def _ephemeral(interaction: discord.Interaction, text: str):
@@ -48,6 +49,61 @@ class ModerationCommands(commands.Cog):
                 await ctx.send(text)
             except Exception:
                 pass
+
+    def _cfg_role_ids(self, guild_id: int, action: str) -> set[int]:
+        raw = self.bot.settings.get_guild(guild_id, f"moderation.permissions.{action}_role_ids", []) or []
+        if isinstance(raw, (int, str)):
+            raw = [raw]
+        out: set[int] = set()
+        for x in raw:
+            try:
+                rid = int(x)
+            except Exception:
+                continue
+            if rid > 0:
+                out.add(rid)
+        return out
+
+    def _has_action_access(self, member: discord.Member, action: str) -> bool:
+        if member.guild_permissions.administrator:
+            return True
+        configured = self._cfg_role_ids(member.guild.id, action)
+        if configured:
+            return any(r.id in configured for r in member.roles)
+        return is_staff(self.bot.settings, member)
+
+    def _parse_lock_mode(self, raw: str | None) -> str:
+        x = str(raw or "all").strip().lower()
+        if x in {"s", "send", "write", "schreiben", "w"}:
+            return "send"
+        if x in {"v", "view", "see", "sehen", "read", "r"}:
+            return "view"
+        return "all"
+
+    async def _apply_channel_lock(
+        self,
+        guild: discord.Guild,
+        actor: discord.Member,
+        channel: discord.TextChannel,
+        mode: str,
+        locked: bool,
+    ) -> tuple[bool, str | None]:
+        overwrite = channel.overwrites_for(guild.default_role)
+        if mode in {"send", "all"}:
+            overwrite.send_messages = False if locked else None
+        if mode in {"view", "all"}:
+            overwrite.view_channel = False if locked else None
+        try:
+            await channel.set_permissions(guild.default_role, overwrite=overwrite, reason=f"moderation:{'lock' if locked else 'unlock'}:{mode}")
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+        try:
+            if self.service.forum_logs:
+                emb = build_channel_access_embed(self.bot.settings, guild, actor, channel, mode, locked)
+                await self.service.forum_logs.emit(guild, "punishments", emb)
+        except Exception:
+            pass
+        return True, None
 
     @app_commands.command(name="timeout", description="⏳ 𑁉 Timeout setzen")
     @app_commands.describe(user="User", minutes="Minuten (leer = Auto)", reason="Grund")
@@ -113,7 +169,7 @@ class ModerationCommands(commands.Cog):
     async def purge(self, interaction: discord.Interaction, amount: int, user: discord.Member | None = None, reason: str | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "purge"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.manage_messages:
             return await _ephemeral(interaction, "Dir fehlt `Manage Messages`.")
@@ -162,7 +218,7 @@ class ModerationCommands(commands.Cog):
     async def slowmode(self, interaction: discord.Interaction, seconds: int):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "slowmode"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.manage_channels:
             return await _ephemeral(interaction, "Dir fehlt `Manage Channels`.")
@@ -176,36 +232,48 @@ class ModerationCommands(commands.Cog):
         await _ephemeral(interaction, f"Slowmode gesetzt: **{s}s**.")
 
     @app_commands.command(name="lock", description="🔒 𑁉 Channel sperren")
-    async def lock(self, interaction: discord.Interaction):
+    @app_commands.describe(mode="all | send | view")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="all", value="all"),
+        app_commands.Choice(name="send", value="send"),
+        app_commands.Choice(name="view", value="view"),
+    ])
+    async def lock(self, interaction: discord.Interaction, mode: app_commands.Choice[str] | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "lock"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.manage_channels:
             return await _ephemeral(interaction, "Dir fehlt `Manage Channels`.")
         if not isinstance(interaction.channel, discord.TextChannel):
             return await _ephemeral(interaction, "Nur in Text-Channels.")
-        try:
-            await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=False)
-        except Exception as e:
-            return await _ephemeral(interaction, f"Lock ging nicht: {type(e).__name__}: {e}")
-        await _ephemeral(interaction, "Channel gesperrt.")
+        m = self._parse_lock_mode(mode.value if mode else "all")
+        ok, err = await self._apply_channel_lock(interaction.guild, interaction.user, interaction.channel, m, True)
+        if not ok:
+            return await _ephemeral(interaction, f"Lock ging nicht: {err}")
+        await _ephemeral(interaction, f"Channel gesperrt. Modus: **{m}**")
 
     @app_commands.command(name="unlock", description="🔓 𑁉 Channel entsperren")
-    async def unlock(self, interaction: discord.Interaction):
+    @app_commands.describe(mode="all | send | view")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="all", value="all"),
+        app_commands.Choice(name="send", value="send"),
+        app_commands.Choice(name="view", value="view"),
+    ])
+    async def unlock(self, interaction: discord.Interaction, mode: app_commands.Choice[str] | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "unlock"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.manage_channels:
             return await _ephemeral(interaction, "Dir fehlt `Manage Channels`.")
         if not isinstance(interaction.channel, discord.TextChannel):
             return await _ephemeral(interaction, "Nur in Text-Channels.")
-        try:
-            await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=True)
-        except Exception as e:
-            return await _ephemeral(interaction, f"Unlock ging nicht: {type(e).__name__}: {e}")
-        await _ephemeral(interaction, "Channel entsperrt.")
+        m = self._parse_lock_mode(mode.value if mode else "all")
+        ok, err = await self._apply_channel_lock(interaction.guild, interaction.user, interaction.channel, m, False)
+        if not ok:
+            return await _ephemeral(interaction, f"Unlock ging nicht: {err}")
+        await _ephemeral(interaction, f"Channel entsperrt. Modus: **{m}**")
 
     @app_commands.command(name="nick", description="🪪 𑁉 Nickname setzen")
     @app_commands.describe(user="User", nickname="Neuer Nickname")
@@ -439,11 +507,11 @@ class ModerationCommands(commands.Cog):
             return await self._ctx_reply(ctx, f"Ban ging nicht: {err}")
         await self._ctx_reply(ctx, f"<@{user.id}> wurde gebannt. (delete_days={dd}) Case: `{case_id}`")
 
-    @commands.command(name="purge")
+    @commands.command(name="purge", aliases=["clear", "prune"])
     async def p_purge(self, ctx: commands.Context, amount: int, user: discord.Member | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "purge"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.manage_messages:
             return await self._ctx_reply(ctx, "Dir fehlt `Manage Messages`.")
@@ -499,37 +567,53 @@ class ModerationCommands(commands.Cog):
             return await self._ctx_reply(ctx, f"Slowmode ging nicht: {type(e).__name__}: {e}")
         await self._ctx_reply(ctx, f"Slowmode gesetzt: **{s}s**.")
 
-    @commands.command(name="lock")
-    async def p_lock(self, ctx: commands.Context):
+    @commands.command(name="lock", aliases=["lockall"])
+    async def p_lock(self, ctx: commands.Context, mode: str | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "lock"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.manage_channels:
             return await self._ctx_reply(ctx, "Dir fehlt `Manage Channels`.")
         if not isinstance(ctx.channel, discord.TextChannel):
             return await self._ctx_reply(ctx, "Nur in Text-Channels.")
-        try:
-            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
-        except Exception as e:
-            return await self._ctx_reply(ctx, f"Lock ging nicht: {type(e).__name__}: {e}")
-        await self._ctx_reply(ctx, "Channel gesperrt.")
+        m = self._parse_lock_mode(mode or "all")
+        ok, err = await self._apply_channel_lock(ctx.guild, ctx.author, ctx.channel, m, True)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Lock ging nicht: {err}")
+        await self._ctx_reply(ctx, f"Channel gesperrt. Modus: **{m}**")
 
-    @commands.command(name="unlock")
-    async def p_unlock(self, ctx: commands.Context):
+    @commands.command(name="unlock", aliases=["unlockall"])
+    async def p_unlock(self, ctx: commands.Context, mode: str | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "unlock"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.manage_channels:
             return await self._ctx_reply(ctx, "Dir fehlt `Manage Channels`.")
         if not isinstance(ctx.channel, discord.TextChannel):
             return await self._ctx_reply(ctx, "Nur in Text-Channels.")
-        try:
-            await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
-        except Exception as e:
-            return await self._ctx_reply(ctx, f"Unlock ging nicht: {type(e).__name__}: {e}")
-        await self._ctx_reply(ctx, "Channel entsperrt.")
+        m = self._parse_lock_mode(mode or "all")
+        ok, err = await self._apply_channel_lock(ctx.guild, ctx.author, ctx.channel, m, False)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Unlock ging nicht: {err}")
+        await self._ctx_reply(ctx, f"Channel entsperrt. Modus: **{m}**")
+
+    @commands.command(name="lockw", aliases=["locksend", "lockwrite"])
+    async def p_lock_w(self, ctx: commands.Context):
+        await self.p_lock(ctx, mode="send")
+
+    @commands.command(name="unlockw", aliases=["unlocksend", "unlockwrite"])
+    async def p_unlock_w(self, ctx: commands.Context):
+        await self.p_unlock(ctx, mode="send")
+
+    @commands.command(name="locks", aliases=["lockview", "locksee"])
+    async def p_lock_s(self, ctx: commands.Context):
+        await self.p_lock(ctx, mode="view")
+
+    @commands.command(name="unlocks", aliases=["unlockview", "unlocksee"])
+    async def p_unlock_s(self, ctx: commands.Context):
+        await self.p_unlock(ctx, mode="view")
 
     @commands.command(name="nick")
     async def p_nick(self, ctx: commands.Context, user: discord.Member, *, nickname: str | None = None):
