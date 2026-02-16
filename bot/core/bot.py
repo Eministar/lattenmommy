@@ -29,6 +29,7 @@ from bot.modules.reminder_afk.cogs.reminder_afk_commands import ReminderAfkComma
 from bot.modules.flags.services.flag_quiz_service import FlagQuizService
 from bot.modules.flags.cogs.flag_commands import FlagCommands
 from bot.modules.flags.cogs.flag_listener import FlagListener
+from bot.modules.flags.views.flag_dashboard import FlagDashboardPersistentView
 from bot.modules.giveaways.cogs.giveaway_commands import GiveawayCommands
 from bot.modules.giveaways.cogs.giveaway_listener import GiveawayListener
 from bot.modules.giveaways.services.giveaway_service import GiveawayService
@@ -199,6 +200,7 @@ class StarryBot(commands.Bot):
         self.add_view(WortInfoView(self.wzs_service))
         self.add_view(SeelsorgePanelView(self.seelsorge_service))
         self.add_view(BeichteInfoView(self.beichte_service))
+        self.add_view(FlagDashboardPersistentView())
 
         @self.tree.error
         async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -363,6 +365,11 @@ class StarryBot(commands.Bot):
             if self.counting_service:
                 try:
                     await self.counting_service.sync_guild(guild)
+                except Exception:
+                    pass
+            if self.flag_quiz_service:
+                try:
+                    await self.flag_quiz_service.refresh_dashboard(guild)
                 except Exception:
                     pass
         if self.poll_service:

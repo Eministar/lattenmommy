@@ -58,6 +58,16 @@ class FlagEasyAnswerView(discord.ui.View):
             self.add_item(FlagEasyAnswerButton(cid, label))
 
 
+class FlagDashboardPersistentView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(FlagDashboardButton("normal"))
+        self.add_item(FlagDashboardButton("easy"))
+        self.add_item(FlagDashboardButton("daily"))
+        self.add_item(FlagDashboardButton("leaderboard"))
+        self.add_item(FlagDashboardButton("streaks"))
+
+
 class FlagReplayButton(discord.ui.Button):
     def __init__(self, action: str):
         labels = {
