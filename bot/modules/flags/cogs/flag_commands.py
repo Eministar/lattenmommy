@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.core.perms import is_staff
+from bot.modules.flags.formatting.flag_embeds import build_leaderboard_embed, build_streaks_embed
 
 
 class FlagCommands(commands.Cog):
@@ -18,14 +19,14 @@ class FlagCommands(commands.Cog):
     @app_commands.describe(channel="Quiz-Kanal (optional)")
     async def setup(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         if not is_staff(self.bot.settings, interaction.user):
-            return await interaction.response.send_message("Keine Rechte.", ephemeral=True)
+            return await interaction.response.send_message("Keine Rechte.", ephemeral=True, delete_after=30)
         if not self.service:
-            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True)
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         target = channel or interaction.channel
         if not isinstance(target, discord.TextChannel):
-            return await interaction.response.send_message("Bitte Textkanal nutzen.", ephemeral=True)
+            return await interaction.response.send_message("Bitte Textkanal nutzen.", ephemeral=True, delete_after=30)
         await interaction.response.defer(ephemeral=True)
         await self.service.setup_channel(interaction.guild, target)
         await interaction.edit_original_response(content=f"Flaggenquiz ist jetzt in {target.mention} aktiv.")
@@ -38,41 +39,43 @@ class FlagCommands(commands.Cog):
     ])
     async def start(self, interaction: discord.Interaction, mode: app_commands.Choice[str] | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member) or not isinstance(interaction.channel, discord.TextChannel):
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         if not self.service:
-            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True)
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         mode_key = str(mode.value) if mode else "normal"
         ok, msg = await self.service.start_round(interaction.guild, interaction.channel, interaction.user, mode_key)
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
 
     @flag.command(name="daily", description="📆 𑁉 Daily-Flagge (1x pro Tag)")
     async def daily(self, interaction: discord.Interaction):
         if not interaction.guild or not isinstance(interaction.user, discord.Member) or not isinstance(interaction.channel, discord.TextChannel):
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         if not self.service:
-            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True)
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         ok, msg = await self.service.start_round(interaction.guild, interaction.channel, interaction.user, "daily")
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
 
     @flag.command(name="leaderboard", description="🏆 𑁉 Top-Spieler")
     async def leaderboard(self, interaction: discord.Interaction):
         if not interaction.guild:
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
-        text = await self.service.leaderboard_text(interaction.guild, limit=10)
-        await interaction.response.send_message(f"**🏆 Leaderboard**\n{text}", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
+        rows = await self.bot.db.list_flag_players_top_points(interaction.guild.id, limit=10)
+        emb = build_leaderboard_embed(self.bot.settings, interaction.guild, rows)
+        await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
 
     @flag.command(name="streaks", description="🔥 𑁉 Top-Streaks")
     async def streaks(self, interaction: discord.Interaction):
         if not interaction.guild:
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
-        text = await self.service.streaks_text(interaction.guild, limit=10)
-        await interaction.response.send_message(f"**🔥 Streaks**\n{text}", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
+        rows = await self.bot.db.list_flag_players_top_streak(interaction.guild.id, limit=10)
+        emb = build_streaks_embed(self.bot.settings, interaction.guild, rows)
+        await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
 
     @flag.command(name="stats", description="📊 𑁉 Spieler-Stats")
     @app_commands.describe(user="Optional anderer User")
     async def stats(self, interaction: discord.Interaction, user: discord.Member | None = None):
         if not interaction.guild or not interaction.user:
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         target = user or interaction.user
         stats = await self.service.stats_for(interaction.guild.id, int(target.id))
         text = (
@@ -81,16 +84,16 @@ class FlagCommands(commands.Cog):
             f"Richtig: **{int(stats['correct'])}** • Falsch: **{int(stats['wrong'])}**\n"
             f"Streak: **{int(stats['current_streak'])}** (Best: {int(stats['best_streak'])})"
         )
-        await interaction.response.send_message(text, ephemeral=True)
+        await interaction.response.send_message(text, ephemeral=True, delete_after=30)
 
     @flag.command(name="info", description="🚩 𑁉 Infos zu einer Flagge")
     @app_commands.describe(land="Land oder ISO-Code (z.B. DE)")
     async def info(self, interaction: discord.Interaction, land: str):
         if not interaction.guild:
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         code, name, fs = await self.service.flag_info(interaction.guild.id, land)
         if not code:
-            return await interaction.response.send_message("Land nicht erkannt.", ephemeral=True)
+            return await interaction.response.send_message("Land nicht erkannt.", ephemeral=True, delete_after=30)
         emb = discord.Embed(
             title=f"🚩 𑁉 {name} ({code})",
             description=(
@@ -99,18 +102,18 @@ class FlagCommands(commands.Cog):
             ),
             color=0xB16B91,
         )
-        emb.set_image(url=f"https://flagcdn.com/w512/{str(code).lower()}.png")
-        await interaction.response.send_message(embed=emb, ephemeral=True)
+        emb.set_image(url=self.service._flag_url_for(code))
+        await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
 
     @flag.command(name="topflags", description="📈 𑁉 Meistgefragte Flaggen")
     @app_commands.describe(limit="Anzahl (max 20)")
     async def topflags(self, interaction: discord.Interaction, limit: int = 10):
         if not interaction.guild:
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         n = max(1, min(20, int(limit)))
         rows = await self.bot.db.list_flag_stats_top_asked(interaction.guild.id, limit=n)
         if not rows:
-            return await interaction.response.send_message("Noch keine Flaggen-Stats.", ephemeral=True)
+            return await interaction.response.send_message("Noch keine Flaggen-Stats.", ephemeral=True, delete_after=30)
         lines = []
         for i, row in enumerate(rows, 1):
             code = str(row[0])
@@ -120,4 +123,4 @@ class FlagCommands(commands.Cog):
             total = max(1, corr + wrong)
             pct = round((corr / total) * 100)
             lines.append(f"#{i} **{code}** - gefragt **{asked}x** • ✅ {corr} • ❌ {wrong} • {pct}%")
-        await interaction.response.send_message("**📈 Top Flaggen**\n" + "\n".join(lines), ephemeral=True)
+        await interaction.response.send_message("**📈 Top Flaggen**\n" + "\n".join(lines), ephemeral=True, delete_after=30)

@@ -33,7 +33,8 @@ def build_dashboard_view(settings, guild: discord.Guild | None, stats: dict, but
     info = em(settings, "info", guild) or "ℹ️"
     header = f"**{info} 𑁉 FLAGGENQUIZ**"
     desc = (
-        f"{arrow2} Echte Flaggenbilder, bessere Auswertung, sauberes Design.\n\n"
+        f"{arrow2} Lerne Länder über echte Flaggenbilder im schnellen Quiz-Modus.\n"
+        f"{arrow2} Starte Normal, Easy oder Daily und sammle Punkte + Streaks.\n\n"
         f"┏`👥` - Spieler: **{int(stats.get('players', 0))}**\n"
         f"┣`🎮` - Runden: **{int(stats.get('rounds', 0))}**\n"
         f"┣`🔥` - Beste Streak: **{int(stats.get('best_streak', 0))}**\n"
@@ -78,7 +79,7 @@ def build_round_embed(
     body = (
         f"{arrow2} Antworte mit dem Ländernamen.\n\n"
         f"┏`👤` - Für: <@{int(target_id)}>\n"
-        f"┣`🌍` - Lösung-Code: **{code}**\n"
+        f"┣`🌍` - Flagge: **Unbekannt**\n"
         f"┣`📈` - Diese Flagge: gefragt **{int(asked)}x**\n"
         f"┣`✅` - Richtig: **{int(correct)}**\n"
         f"┣`❌` - Falsch: **{int(wrong)}**\n"
@@ -86,7 +87,6 @@ def build_round_embed(
     )
     emb = discord.Embed(title=title, description=body, color=_color(settings, guild))
     emb.set_image(url=str(flag_url))
-    emb.set_footer(text=f"Lösung intern: {country_name}")
     return emb
 
 
@@ -123,3 +123,46 @@ def build_result_embed(
     emb = discord.Embed(title=title, description=desc, color=_color(settings, guild))
     emb.set_image(url=str(flag_url))
     return emb
+
+
+def build_leaderboard_embed(settings, guild: discord.Guild, rows: list[tuple]) -> discord.Embed:
+    if not rows:
+        return discord.Embed(
+            title="🏆 𑁉 LEADERBOARD",
+            description="Noch keine Einträge.",
+            color=_color(settings, guild),
+        )
+    lines = []
+    for i, row in enumerate(rows, 1):
+        uid = int(row[0])
+        points = int(row[1] or 0)
+        member = guild.get_member(uid)
+        name = member.display_name if member else str(uid)
+        lines.append(f"`#{i}` **{name}** — **{points}** Punkte")
+    return discord.Embed(
+        title="🏆 𑁉 LEADERBOARD",
+        description="\n".join(lines),
+        color=_color(settings, guild),
+    )
+
+
+def build_streaks_embed(settings, guild: discord.Guild, rows: list[tuple]) -> discord.Embed:
+    if not rows:
+        return discord.Embed(
+            title="🔥 𑁉 STREAKS",
+            description="Noch keine Einträge.",
+            color=_color(settings, guild),
+        )
+    lines = []
+    for i, row in enumerate(rows, 1):
+        uid = int(row[0])
+        cur = int(row[1] or 0)
+        best = int(row[2] or 0)
+        member = guild.get_member(uid)
+        name = member.display_name if member else str(uid)
+        lines.append(f"`#{i}` **{name}** — Streak **{cur}** (Best **{best}**)")
+    return discord.Embed(
+        title="🔥 𑁉 STREAKS",
+        description="\n".join(lines),
+        color=_color(settings, guild),
+    )

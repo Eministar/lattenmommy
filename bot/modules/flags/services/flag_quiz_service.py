@@ -328,7 +328,7 @@ class FlagQuizService:
         if button_map:
             from bot.modules.flags.views.flag_dashboard import FlagEasyAnswerView
             view = FlagEasyAnswerView(button_view_map)
-        msg = await channel.send(embed=emb, view=view)
+        msg = await channel.send(embed=emb, view=view, delete_after=30)
 
         async def _timeout():
             await asyncio.sleep(self.TIME_LIMIT_SECONDS)
@@ -393,14 +393,14 @@ class FlagQuizService:
         if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel) or not interaction.user:
             return
         if not self._enabled(interaction.guild.id):
-            return await interaction.response.send_message("Flaggenquiz ist deaktiviert.", ephemeral=True)
+            return await interaction.response.send_message("Flaggenquiz ist deaktiviert.", ephemeral=True, delete_after=30)
         uid = int(interaction.user.id)
         key = self._quiz_key(interaction.guild.id, interaction.channel.id, uid)
         round_ = self._rounds.get(key)
         if not round_:
-            return await interaction.response.send_message("Keine aktive Runde für dich.", ephemeral=True)
+            return await interaction.response.send_message("Keine aktive Runde für dich.", ephemeral=True, delete_after=30)
         await self._resolve_round(interaction.guild, interaction.channel, interaction.user, round_, str(round_.code).upper() == str(code).upper())
-        await interaction.response.send_message("Antwort verarbeitet.", ephemeral=True)
+        await interaction.response.send_message("Antwort verarbeitet.", ephemeral=True, delete_after=30)
 
     async def _resolve_round(self, guild: discord.Guild, channel: discord.TextChannel, user: discord.abc.User, round_: ActiveRound, correct: bool):
         key = self._quiz_key(guild.id, channel.id, int(user.id))
@@ -487,7 +487,7 @@ class FlagQuizService:
                     continue
                 ch = guild.get_channel(int(ch_id))
                 if isinstance(ch, discord.TextChannel):
-                    await ch.send(f"🏅 <@{int(user.id)}> hat den Flaggen-Erfolg freigeschaltet: **{threshold}er Streak**!", delete_after=20)
+                    await ch.send(f"🏅 <@{int(user.id)}> hat den Flaggen-Erfolg freigeschaltet: **{threshold}er Streak**!", delete_after=30)
             except Exception:
                 pass
 

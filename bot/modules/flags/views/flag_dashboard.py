@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import discord
 
+from bot.modules.flags.formatting.flag_embeds import build_leaderboard_embed, build_streaks_embed
+
 
 class FlagDashboardButton(discord.ui.Button):
     def __init__(self, action: str):
@@ -17,21 +19,23 @@ class FlagDashboardButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         if not interaction.guild or not interaction.channel or not interaction.user:
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
         action = str(self.custom_id).split(":")[-1]
         service = getattr(interaction.client, "flag_quiz_service", None)
         if not service:
-            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True)
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         if action in {"normal", "easy", "daily"}:
             ok, msg = await service.start_round(interaction.guild, interaction.channel, interaction.user, action)
-            return await interaction.response.send_message(msg, ephemeral=True)
+            return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
         if action == "leaderboard":
-            text = await service.leaderboard_text(interaction.guild, limit=10)
-            return await interaction.response.send_message(f"**🏆 Leaderboard**\n{text}", ephemeral=True)
+            rows = await interaction.client.db.list_flag_players_top_points(interaction.guild.id, limit=10)
+            emb = build_leaderboard_embed(interaction.client.settings, interaction.guild, rows)
+            return await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
         if action == "streaks":
-            text = await service.streaks_text(interaction.guild, limit=10)
-            return await interaction.response.send_message(f"**🔥 Streaks**\n{text}", ephemeral=True)
-        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True)
+            rows = await interaction.client.db.list_flag_players_top_streak(interaction.guild.id, limit=10)
+            emb = build_streaks_embed(interaction.client.settings, interaction.guild, rows)
+            return await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
+        await interaction.response.send_message("Unbekannte Aktion.", ephemeral=True, delete_after=30)
 
 
 class FlagEasyAnswerButton(discord.ui.Button):
@@ -41,7 +45,7 @@ class FlagEasyAnswerButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         service = getattr(interaction.client, "flag_quiz_service", None)
         if not service:
-            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True)
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         code = str(self.custom_id).split(":")[-1]
         await service.handle_easy_button(interaction, code)
 
