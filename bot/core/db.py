@@ -2640,6 +2640,17 @@ class Database:
         )
         await self._conn.commit()
 
+    async def update_afk_until(self, guild_id: int, user_id: int, until_at: str | None):
+        await self._conn.execute(
+            """
+            UPDATE afk_status
+            SET until_at = ?
+            WHERE guild_id = ? AND user_id = ?;
+            """,
+            (str(until_at) if until_at else None, int(guild_id), int(user_id)),
+        )
+        await self._conn.commit()
+
     async def get_afk_status(self, guild_id: int, user_id: int):
         cur = await self._conn.execute(
             """

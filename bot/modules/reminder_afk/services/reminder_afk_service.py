@@ -34,6 +34,16 @@ class ReminderAfkService:
         except Exception:
             return 6
 
+    def _afk_extend_default_seconds(self, guild_id: int) -> int:
+        try:
+            raw = str(self.settings.get_guild(guild_id, "reminder_afk.afk_extend_default", "30m") or "30m")
+            sec = self._parse_duration(raw)
+            if sec:
+                return int(sec)
+        except Exception:
+            pass
+        return 1800
+
     def _parse_duration(self, text: str | None) -> int | None:
         raw = str(text or "").strip().lower()
         if not raw:
@@ -108,6 +118,43 @@ class ReminderAfkService:
 
     async def clear_afk(self, guild_id: int, user_id: int):
         await self.db.clear_afk_status(guild_id, user_id)
+
+    async def get_afk_snapshot(self, guild_id: int, user_id: int) -> dict | None:
+        row = await self.db.get_afk_status(guild_id, user_id)
+        if not row:
+            return None
+        events = await self.db.list_afk_mention_events(guild_id, user_id, limit=1000)
+        return {
+            "guild_id": int(row[0]),
+            "user_id": int(row[1]),
+            "reason": str(row[2] or "AFK"),
+            "set_at": str(row[3] or ""),
+            "until_at": str(row[4] or ""),
+            "mentions": int(len(events)),
+        }
+
+    async def extend_afk_default(self, member: discord.Member) -> tuple[bool, str]:
+        row = await self.db.get_afk_status(member.guild.id, member.id)
+        if not row:
+            return False, "Du bist aktuell nicht AFK."
+        now = datetime.now(timezone.utc)
+        current_until = str(row[4] or "")
+        base = now
+        if current_until:
+            try:
+                dt = datetime.fromisoformat(current_until)
+                if dt > now:
+                    base = dt
+            except Exception:
+                pass
+        seconds = self._afk_extend_default_seconds(member.guild.id)
+        new_until = (base + timedelta(seconds=seconds)).isoformat()
+        await self.db.update_afk_until(member.guild.id, member.id, new_until)
+        try:
+            dt_new = datetime.fromisoformat(new_until)
+            return True, f"AFK verlängert bis {format_dt(dt_new, style='R')}."
+        except Exception:
+            return True, "AFK verlängert."
 
     async def clear_afk_with_summary(self, guild: discord.Guild, user: discord.Member) -> tuple[bool, discord.ui.LayoutView | None]:
         row = await self.db.get_afk_status(guild.id, user.id)
