@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import discord
+from discord.utils import format_dt
 
 from bot.utils.assets import Banners
 from bot.utils.emojis import em
@@ -55,7 +58,9 @@ def build_round_embed(
     target_id: int,
     country_name: str,
     code: str,
+    flag_url: str,
     mode: str,
+    end_at: datetime | None = None,
     asked: int = 0,
     correct: int = 0,
     wrong: int = 0,
@@ -63,6 +68,13 @@ def build_round_embed(
     arrow2 = em(settings, "arrow2", guild) or "»"
     mode_text = {"normal": "Normal", "easy": "Easy", "daily": "Daily"}.get(str(mode), "Normal")
     title = f"**🎯 𑁉 FLAGGENRÄTSEL ({mode_text})**"
+    timer_text = "**30s**"
+    if end_at is not None:
+        try:
+            timer_text = f"{format_dt(end_at, style='R')} ({format_dt(end_at, style='t')})"
+        except Exception:
+            timer_text = "**30s**"
+
     body = (
         f"{arrow2} Antworte mit dem Ländernamen.\n\n"
         f"┏`👤` - Für: <@{int(target_id)}>\n"
@@ -70,10 +82,10 @@ def build_round_embed(
         f"┣`📈` - Diese Flagge: gefragt **{int(asked)}x**\n"
         f"┣`✅` - Richtig: **{int(correct)}**\n"
         f"┣`❌` - Falsch: **{int(wrong)}**\n"
-        f"┗`⏱️` - Zeitlimit: **30s**"
+        f"┗`⏱️` - Zeitlimit: {timer_text}"
     )
     emb = discord.Embed(title=title, description=body, color=_color(settings, guild))
-    emb.set_image(url=f"https://flagcdn.com/w1024/{code.lower()}.png")
+    emb.set_image(url=str(flag_url))
     emb.set_footer(text=f"Lösung intern: {country_name}")
     return emb
 
@@ -85,6 +97,7 @@ def build_result_embed(
     user_id: int,
     country_name: str,
     code: str,
+    flag_url: str,
     points: int,
     streak: int,
     asked: int = 0,
@@ -108,5 +121,5 @@ def build_result_embed(
             f"┗`📊` - Flaggen-Stats: **{int(asked)}** gefragt • ✅ {int(right_total)} • ❌ {int(wrong_total)}"
         )
     emb = discord.Embed(title=title, description=desc, color=_color(settings, guild))
-    emb.set_image(url=f"https://flagcdn.com/w1024/{code.lower()}.png")
+    emb.set_image(url=str(flag_url))
     return emb

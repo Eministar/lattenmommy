@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 import random
 import re
@@ -24,9 +24,11 @@ class ActiveRound:
     user_id: int
     mode: str
     code: str
+    flag_url: str
     answer_names: set[str]
     button_map: dict[str, str]
     task: asyncio.Task | None
+    end_at: datetime
 
 
 class FlagQuizService:
@@ -44,6 +46,7 @@ class FlagQuizService:
         self._rounds: dict[tuple[int, int, int], ActiveRound] = {}
         self._codes: list[str] = ["DE", "US", "GB", "FR", "IT", "ES", "NL", "PL", "SE", "NO", "JP", "KR", "CN", "BR", "AR", "MX", "CA", "AU", "AT", "CH"]
         self._code_to_name: dict[str, str] = {}
+        self._code_to_flag_url: dict[str, str] = {}
         self._alias_to_code: dict[str, str] = {
             "deutschland": "DE",
             "germany": "DE",
@@ -98,7 +101,7 @@ class FlagQuizService:
         self._loaded_country_data = True
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
-                res = await client.get("https://restcountries.com/v3.1/all?fields=cca2,name,translations")
+                res = await client.get("https://restcountries.com/v3.1/all?fields=cca2,name,translations,flags")
             if res.status_code != 200:
                 return
             data = res.json()
@@ -109,6 +112,10 @@ class FlagQuizService:
                     continue
                 name = str(((row or {}).get("name", {}) or {}).get("common", code)).strip() or code
                 self._code_to_name[code] = name
+                flags = (row or {}).get("flags", {}) or {}
+                flag_url = str(flags.get("png") or "").strip()
+                if flag_url:
+                    self._code_to_flag_url[code] = flag_url
                 self._alias_to_code[self._normalize(name)] = code
                 de = str((((row or {}).get("translations", {}) or {}).get("deu", {}) or {}).get("common", "")).strip()
                 if de:
@@ -189,6 +196,13 @@ class FlagQuizService:
 
     def _name_for(self, code: str) -> str:
         return self._code_to_name.get(str(code).upper(), str(code).upper())
+
+    def _flag_url_for(self, code: str) -> str:
+        c = str(code or "").upper()
+        direct = str(self._code_to_flag_url.get(c) or "").strip()
+        if direct:
+            return direct
+        return f"https://flagcdn.com/h240/{c.lower()}.png"
 
     async def _dashboard_stats(self, guild: discord.Guild) -> dict[str, Any]:
         top = await self.db.list_flag_players_top_points(guild.id, limit=1)
@@ -294,6 +308,8 @@ class FlagQuizService:
         fs = await self._get_flag_stats(guild.id, code)
         fs["asked"] += 1
         await self._save_flag_stats(guild.id, code, fs)
+        flag_url = self._flag_url_for(code)
+        end_at = datetime.now(timezone.utc) + timedelta(seconds=self.TIME_LIMIT_SECONDS)
 
         emb = build_round_embed(
             self.settings,
@@ -301,7 +317,9 @@ class FlagQuizService:
             user.id,
             name,
             code,
+            flag_url,
             mode_key,
+            end_at=end_at,
             asked=int(fs["asked"]),
             correct=int(fs["correct"]),
             wrong=int(fs["wrong"]),
@@ -333,6 +351,7 @@ class FlagQuizService:
                     user.id,
                     name,
                     code,
+                    flag_url,
                     0,
                     0,
                     asked=int(fstats["asked"]),
@@ -344,7 +363,7 @@ class FlagQuizService:
             await self.refresh_dashboard(guild)
 
         task = asyncio.create_task(_timeout())
-        self._rounds[key] = ActiveRound(guild.id, channel.id, user.id, mode_key, code, answers, button_map, task)
+        self._rounds[key] = ActiveRound(guild.id, channel.id, user.id, mode_key, code, flag_url, answers, button_map, task, end_at)
         return True, "Runde gestartet."
 
     async def handle_text_answer(self, message: discord.Message):
@@ -410,6 +429,7 @@ class FlagQuizService:
                     int(user.id),
                     name,
                     round_.code,
+                    round_.flag_url,
                     gain,
                     int(ps["current_streak"]),
                     asked=int(fstats["asked"]),
@@ -434,6 +454,7 @@ class FlagQuizService:
                     int(user.id),
                     name,
                     round_.code,
+                    round_.flag_url,
                     0,
                     0,
                     asked=int(fstats["asked"]),
