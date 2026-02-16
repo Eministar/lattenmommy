@@ -31,6 +31,22 @@ class FlagCommands(commands.Cog):
         await self.service.setup_channel(interaction.guild, target)
         await interaction.edit_original_response(content=f"Flaggenquiz ist jetzt in {target.mention} aktiv.")
 
+    @flag.command(name="panel", description="♻️ 𑁉 Flaggen-Panel aktualisieren/wiederverwenden")
+    @app_commands.describe(channel="Optional anderer Kanal")
+    async def panel(self, interaction: discord.Interaction, channel: discord.TextChannel | None = None):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
+        if not is_staff(self.bot.settings, interaction.user):
+            return await interaction.response.send_message("Keine Rechte.", ephemeral=True, delete_after=30)
+        if not self.service:
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
+        target = channel or interaction.channel
+        if not isinstance(target, discord.TextChannel):
+            return await interaction.response.send_message("Bitte Textkanal nutzen.", ephemeral=True, delete_after=30)
+        await interaction.response.defer(ephemeral=True)
+        await self.service.ensure_dashboard(interaction.guild, target)
+        await interaction.edit_original_response(content=f"Flaggen-Panel in {target.mention} aktualisiert.")
+
     @flag.command(name="start", description="🎯 𑁉 Neues Flaggenrätsel starten")
     @app_commands.describe(mode="normal / easy")
     @app_commands.choices(mode=[

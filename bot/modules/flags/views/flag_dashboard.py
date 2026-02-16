@@ -56,3 +56,30 @@ class FlagEasyAnswerView(discord.ui.View):
         for cid, payload in button_map.items():
             _code, label = payload
             self.add_item(FlagEasyAnswerButton(cid, label))
+
+
+class FlagReplayButton(discord.ui.Button):
+    def __init__(self, action: str):
+        labels = {
+            "normal": ("Rätsel", "🎯", discord.ButtonStyle.success),
+            "easy": ("Easy", "✨", discord.ButtonStyle.primary),
+        }
+        label, emoji, style = labels.get(action, ("Rätsel", "🎯", discord.ButtonStyle.secondary))
+        super().__init__(label=label, emoji=emoji, style=style, custom_id=f"starry:flag_replay:{action}")
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel) or not interaction.user:
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
+        service = getattr(interaction.client, "flag_quiz_service", None)
+        if not service:
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
+        action = str(self.custom_id).split(":")[-1]
+        ok, msg = await service.start_round(interaction.guild, interaction.channel, interaction.user, action)
+        await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
+
+
+class FlagReplayView(discord.ui.View):
+    def __init__(self, timeout: float | None = 35):
+        super().__init__(timeout=timeout)
+        self.add_item(FlagReplayButton("normal"))
+        self.add_item(FlagReplayButton("easy"))

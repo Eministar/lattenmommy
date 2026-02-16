@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 import random
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 import discord
@@ -91,9 +92,36 @@ class FlagQuizService:
 
     def _normalize(self, text: str) -> str:
         x = str(text or "").strip().lower()
+        x = (
+            x.replace("ä", "ae")
+            .replace("ö", "oe")
+            .replace("ü", "ue")
+            .replace("ß", "ss")
+        )
         x = re.sub(r"[^a-z0-9 ]", " ", x)
         x = re.sub(r"\s+", " ", x).strip()
         return x
+
+    def _code_from_flag_emoji(self, text: str) -> str | None:
+        chars = [ord(ch) for ch in str(text or "").strip() if 0x1F1E6 <= ord(ch) <= 0x1F1FF]
+        if len(chars) < 2:
+            return None
+        a, b = chars[0], chars[1]
+        return chr((a - 0x1F1E6) + ord("A")) + chr((b - 0x1F1E6) + ord("A"))
+
+    def _is_fuzzy_match(self, guess: str, candidate: str) -> bool:
+        g = self._normalize(guess)
+        c = self._normalize(candidate)
+        if not g or not c:
+            return False
+        if g == c:
+            return True
+        if abs(len(g) - len(c)) > 2:
+            return False
+        ratio = SequenceMatcher(None, g, c).ratio()
+        if len(c) <= 5:
+            return ratio >= 0.78
+        return ratio >= 0.74
 
     async def _ensure_country_data(self):
         if self._loaded_country_data:
@@ -204,6 +232,14 @@ class FlagQuizService:
             return direct
         return f"https://flagcdn.com/h240/{c.lower()}.png"
 
+    def _answer_candidates_for(self, code: str, name: str) -> set[str]:
+        target = str(code).upper()
+        out = {self._normalize(target), self._normalize(name)}
+        for alias, mapped in self._alias_to_code.items():
+            if str(mapped).upper() == target:
+                out.add(self._normalize(alias))
+        return {x for x in out if x}
+
     async def _dashboard_stats(self, guild: discord.Guild) -> dict[str, Any]:
         top = await self.db.list_flag_players_top_points(guild.id, limit=1)
         leader = "Noch kein Eintrag"
@@ -246,8 +282,41 @@ class FlagQuizService:
                 return
             except Exception:
                 pass
+        reuse = await self._find_existing_dashboard_message(channel)
+        if reuse:
+            try:
+                await reuse.edit(view=view)
+                await self.db.set_flag_quiz_dashboard_message(guild.id, int(reuse.id))
+                return
+            except Exception:
+                pass
         msg = await channel.send(view=view)
         await self.db.set_flag_quiz_dashboard_message(guild.id, int(msg.id))
+
+    async def _find_existing_dashboard_message(self, channel: discord.TextChannel) -> discord.Message | None:
+        me = getattr(self.bot, "user", None)
+        if not me:
+            return None
+        try:
+            async for msg in channel.history(limit=40):
+                if int(msg.author.id) != int(me.id):
+                    continue
+                if self._is_dashboard_message(msg):
+                    return msg
+        except Exception:
+            return None
+        return None
+
+    def _is_dashboard_message(self, msg: discord.Message) -> bool:
+        try:
+            for row in list(msg.components or []):
+                for item in list(getattr(row, "children", []) or []):
+                    cid = str(getattr(item, "custom_id", "") or "")
+                    if cid.startswith("starry:flag_dash:"):
+                        return True
+        except Exception:
+            return False
+        return False
 
     def build_dashboard_view(self, guild: discord.Guild, stats: dict[str, Any]) -> discord.ui.LayoutView:
         from bot.modules.flags.views.flag_dashboard import FlagDashboardButton
@@ -288,9 +357,7 @@ class FlagQuizService:
         else:
             code = self._random_code()
         name = self._name_for(code)
-        answers = {self._normalize(name), self._normalize(code)}
-        if self._normalize(name) in self._alias_to_code:
-            answers.add(self._normalize(name))
+        answers = self._answer_candidates_for(code, name)
 
         button_map: dict[str, str] = {}
         button_view_map: dict[str, tuple[str, str]] = {}
@@ -358,6 +425,7 @@ class FlagQuizService:
                     right_total=int(fstats["correct"]),
                     wrong_total=int(fstats["wrong"]),
                 ),
+                view=self._build_replay_view(),
                 delete_after=30,
             )
             await self.refresh_dashboard(guild)
@@ -383,7 +451,12 @@ class FlagQuizService:
         round_ = self._rounds.get(key)
         if not round_:
             return
-        await self._resolve_round(message.guild, message.channel, message.author, round_, self._normalize(content) == self._normalize(round_.code) or self._normalize(content) in round_.answer_names)
+        normalized = self._normalize(content)
+        by_flag_emoji = str(self._code_from_flag_emoji(content) or "").upper() == str(round_.code).upper()
+        by_exact = normalized == self._normalize(round_.code) or normalized in round_.answer_names
+        by_fuzzy = any(self._is_fuzzy_match(normalized, cand) for cand in round_.answer_names)
+        is_correct = bool(by_flag_emoji or by_exact or by_fuzzy)
+        await self._resolve_round(message.guild, message.channel, message.author, round_, is_correct)
         try:
             await message.delete()
         except Exception:
@@ -436,6 +509,7 @@ class FlagQuizService:
                     right_total=int(fstats["correct"]),
                     wrong_total=int(fstats["wrong"]),
                 ),
+                view=self._build_replay_view(),
                 delete_after=30,
             )
             await self._check_streak_achievements(guild, user, int(ps["current_streak"]))
@@ -461,9 +535,14 @@ class FlagQuizService:
                     right_total=int(fstats["correct"]),
                     wrong_total=int(fstats["wrong"]),
                 ),
+                view=self._build_replay_view(),
                 delete_after=30,
             )
         await self.refresh_dashboard(guild)
+
+    def _build_replay_view(self):
+        from bot.modules.flags.views.flag_dashboard import FlagReplayView
+        return FlagReplayView()
 
     async def _check_streak_achievements(self, guild: discord.Guild, user: discord.abc.User, current_streak: int):
         for threshold in self.STREAK_ACHIEVEMENTS:
