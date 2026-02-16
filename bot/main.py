@@ -77,6 +77,10 @@ async def main():
 
     def _request_shutdown():
         if not stop_event.is_set():
+            try:
+                console.line("STOP", "Shutdown-Signal empfangen …", color="yellow")
+            except Exception:
+                pass
             stop_event.set()
 
     try:
@@ -120,6 +124,7 @@ async def main():
             pass
 
     if stop_task in done and not bot_task.done():
+        console.line("STOP", "Bot wird sauber beendet …", color="yellow")
         try:
             await bot.close()
         except Exception:
@@ -133,12 +138,21 @@ async def main():
             pass
 
     try:
+        console.line("WEB", "Dashboard wird gestoppt …", color="yellow")
         await web.stop()
+        console.line("WEB", "Dashboard gestoppt.", color="green")
     except Exception:
         pass
 
     try:
+        console.line("DB", "Datenbankverbindung wird geschlossen …", color="yellow")
         await db.close()
+        console.line("DB", "Datenbankverbindung geschlossen.", color="green")
+    except Exception:
+        pass
+
+    try:
+        console.line("BYE", "Shutdown abgeschlossen. Bis später.", color="magenta")
     except Exception:
         pass
 
