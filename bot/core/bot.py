@@ -388,6 +388,10 @@ class StarryBot(commands.Bot):
                 await self.bot_status_service.send_start()
             except Exception:
                 pass
+        try:
+            console.line("STARTED", "Bot vollständig gestartet und bereit.", color="green")
+        except Exception:
+            pass
 
     async def on_error(self, event_method: str, *args, **kwargs):
         import sys

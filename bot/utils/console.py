@@ -54,14 +54,22 @@ class Console:
         print(f"{label} {msg}")
 
     def banner(self, app_name: str = "STARRY"):
-        top = self.style("╔══════════════════════════════════════════════════════════════╗", "magenta")
-        mid = self.style("║", "magenta")
-        txt = self.style(f" {app_name} BOT BOOT ", "cyan", bold=True)
-        sub = self.style("Design-Start • Module laden • Discord verbinden", "gray")
-        bot = self.style("╚══════════════════════════════════════════════════════════════╝", "magenta")
+        width = 62
+        top = self.style("╔" + ("═" * width) + "╗", "magenta")
+        bot = self.style("╚" + ("═" * width) + "╝", "magenta")
         print(top)
-        print(f"{mid}{txt.ljust(62)}{mid}")
-        print(f"{mid} {sub.ljust(60)}{mid}")
+        title = f" {app_name} BOT BOOT "
+        subtitle = " Design-Start | Module laden | Discord verbinden "
+        print(
+            f"{self.style('║', 'magenta')}"
+            f"{self.style(title.center(width), 'cyan', bold=True)}"
+            f"{self.style('║', 'magenta')}"
+        )
+        print(
+            f"{self.style('║', 'magenta')}"
+            f"{self.style(subtitle.center(width), 'gray')}"
+            f"{self.style('║', 'magenta')}"
+        )
         print(bot)
 
 
