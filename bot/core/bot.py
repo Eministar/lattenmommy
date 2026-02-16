@@ -85,6 +85,7 @@ from bot.modules.bot_status.services.bot_status_service import BotStatusService
 from bot.core.presence import PresenceRotator
 from bot.modules.logs.forum_log_service import ForumLogService
 from bot.modules.logs.formatting.log_embeds import build_bot_error_embed
+from bot.utils.console import console
 
 
 class StarryBot(commands.Bot):
@@ -337,7 +338,7 @@ class StarryBot(commands.Bot):
             return
         self._boot_done = True
         try:
-            print(f"[OK] Discord verbunden als {self.user} ({self.user.id})")
+            console.line("DISCORD", f"Verbunden als {self.user} ({self.user.id})", color="green")
         except Exception:
             pass
         await self.forum_logs.start()

@@ -1,5 +1,6 @@
 import discord
 from discord.ext import tasks
+from bot.utils.console import console
 
 _PRESENCE_TEXT_1 = "💌 𑁉 Schreib mir eine DM für Support"
 
@@ -16,7 +17,7 @@ class PresenceRotator:
         if not self._loop.is_running():
             self._loop.start()
             try:
-                print("[OK] PresenceRotator gestartet")
+                console.line("PRESENCE", "PresenceRotator gestartet.", color="green")
             except Exception:
                 pass
 
@@ -106,7 +107,7 @@ class PresenceRotator:
         except Exception as exc:
             if not self._error_logged:
                 try:
-                    print(f"[WARN] PresenceRotator Stats fehlgeschlagen ({type(exc).__name__}): {exc}")
+                    console.line("WARN", f"Presence-Stats fehlgeschlagen ({type(exc).__name__}): {exc}", color="yellow")
                 except Exception:
                     pass
                 self._error_logged = True

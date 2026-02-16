@@ -9,6 +9,7 @@ from bot.core.db import Database
 from bot.core.logger import StarryLogger
 from bot.core.bot import StarryBot
 from bot.web.server import WebServer
+from bot.utils.console import console
 
 
 def _mask_token(token: str) -> str:
@@ -27,21 +28,28 @@ def _load_token(settings: SettingsManager) -> str:
         raise RuntimeError("Kein Discord Token gefunden. Setz bot.token in config.yml oder DISCORD_TOKEN als Env-Var.")
 
     if cfg_token:
-        print(f"[SECURITY] bot.token wird aus config.yml genutzt ({_mask_token(cfg_token)}). Bitte config.yml NICHT committen.")
+        console.line(
+            "SECURITY",
+            f"bot.token aus config.yml aktiv ({_mask_token(cfg_token)}). config.yml nicht committen.",
+            color="yellow",
+        )
     else:
-        print(f"[OK] Token wird aus DISCORD_TOKEN genutzt ({_mask_token(env_token)}).")
+        console.line("OK", f"Token aus DISCORD_TOKEN aktiv ({_mask_token(env_token)}).", color="green")
 
     return token
 
 
 async def main():
     load_dotenv()
+    console.banner("STARRY")
+    console.line("BOOT", "Settings laden …", color="cyan")
 
     settings = SettingsManager(
         config_path="config/config.yml",
         override_path="data/settings.json",
     )
     await settings.load()
+    console.line("BOOT", "Settings geladen.", color="green")
 
     token = _load_token(settings)
 
@@ -49,11 +57,15 @@ async def main():
     if db_type == "mysql":
         mysql_cfg = settings.get("database.mysql", {}) or {}
         db = Database(mysql=mysql_cfg)
+        console.line("DB", "Treiber: MySQL", color="blue")
     else:
         sqlite_path = str(settings.get("database.sqlite_path", "data/starry.db") or "data/starry.db")
         db = Database(path=sqlite_path)
+        console.line("DB", f"Treiber: SQLite ({sqlite_path})", color="blue")
     await db.init()
+    console.line("DB", "Verbindung initialisiert.", color="green")
     await settings.load_guild_overrides(db)
+    console.line("BOOT", "Guild-Overrides geladen.", color="green")
 
     logger = StarryLogger(settings=settings, db=db)
 
@@ -80,7 +92,8 @@ async def main():
     await web.start()
     dash_host = settings.get("bot.dashboard.host", "0.0.0.0")
     dash_port = int(settings.get("bot.dashboard.port", 8787))
-    print(f"[OK] Dashboard läuft auf {dash_host}:{dash_port}")
+    console.line("WEB", f"Dashboard läuft auf {dash_host}:{dash_port}", color="green")
+    console.line("BOOT", "Discord-Login startet …", color="cyan")
 
     async def _run_bot():
         try:
@@ -88,7 +101,7 @@ async def main():
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[ERROR] Bot-Start fehlgeschlagen ({type(exc).__name__}): {exc}")
+            console.line("ERROR", f"Bot-Start fehlgeschlagen ({type(exc).__name__}): {exc}", color="red")
             traceback.print_exc()
             raise
 
