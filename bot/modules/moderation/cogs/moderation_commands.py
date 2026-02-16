@@ -110,7 +110,7 @@ class ModerationCommands(commands.Cog):
     async def timeout(self, interaction: discord.Interaction, user: discord.Member, minutes: int | None = None, reason: str | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "timeout"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.moderate_members:
             return await _ephemeral(interaction, "Dir fehlt `Moderate Members`.")
@@ -139,7 +139,7 @@ class ModerationCommands(commands.Cog):
     async def kick(self, interaction: discord.Interaction, user: discord.Member, reason: str | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "kick"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.kick_members:
             return await _ephemeral(interaction, "Dir fehlt `Kick Members`.")
@@ -154,7 +154,7 @@ class ModerationCommands(commands.Cog):
     async def ban(self, interaction: discord.Interaction, user: discord.User, delete_days: int = 0, reason: str | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "ban"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.ban_members:
             return await _ephemeral(interaction, "Dir fehlt `Ban Members`.")
@@ -188,7 +188,7 @@ class ModerationCommands(commands.Cog):
     async def untimeout(self, interaction: discord.Interaction, user: discord.Member, reason: str | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._has_action_access(interaction.user, "untimeout"):
             return await _ephemeral(interaction, "Keine Rechte.")
         if not interaction.user.guild_permissions.moderate_members:
             return await _ephemeral(interaction, "Dir fehlt `Moderate Members`.")
@@ -197,6 +197,21 @@ class ModerationCommands(commands.Cog):
         except Exception as e:
             return await _ephemeral(interaction, f"Timeout entfernen ging nicht: {type(e).__name__}: {e}")
         await _ephemeral(interaction, f"Timeout entfernt für {user.mention}.")
+
+    @app_commands.command(name="mute", description="🔇 𑁉 Mute (Timeout) setzen")
+    @app_commands.describe(user="User", minutes="Minuten", reason="Grund")
+    async def mute(self, interaction: discord.Interaction, user: discord.Member, minutes: int = 10, reason: str | None = None):
+        if not self._need_guild(interaction):
+            return
+        if not self._has_action_access(interaction.user, "mute"):
+            return await _ephemeral(interaction, "Keine Rechte.")
+        if not interaction.user.guild_permissions.moderate_members:
+            return await _ephemeral(interaction, "Dir fehlt `Moderate Members`.")
+        used = max(1, min(43200, int(minutes)))
+        ok, err, used_minutes, strikes, case_id = await self.service.timeout(interaction.guild, interaction.user, user, used, reason)
+        if not ok:
+            return await _ephemeral(interaction, f"Mute ging nicht: {err}")
+        return await _ephemeral(interaction, f"Mute gesetzt: **{used_minutes}min**. Case: `{case_id}`")
 
     @app_commands.command(name="unban", description="♻️ 𑁉 User entbannen")
     @app_commands.describe(user_id="User-ID", reason="Grund")
@@ -461,7 +476,7 @@ class ModerationCommands(commands.Cog):
     async def p_timeout(self, ctx: commands.Context, user: discord.Member, minutes: int | None = None, *, reason: str | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "timeout"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.moderate_members:
             return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
@@ -485,7 +500,7 @@ class ModerationCommands(commands.Cog):
     async def p_kick(self, ctx: commands.Context, user: discord.Member, *, reason: str | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "kick"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.kick_members:
             return await self._ctx_reply(ctx, "Dir fehlt `Kick Members`.")
@@ -498,7 +513,7 @@ class ModerationCommands(commands.Cog):
     async def p_ban(self, ctx: commands.Context, user: discord.User, delete_days: int = 0, *, reason: str | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "ban"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.ban_members:
             return await self._ctx_reply(ctx, "Dir fehlt `Ban Members`.")
@@ -526,7 +541,7 @@ class ModerationCommands(commands.Cog):
     async def p_untimeout(self, ctx: commands.Context, user: discord.Member, *, reason: str | None = None):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._has_action_access(ctx.author, "untimeout"):
             return await self._ctx_reply(ctx, "Keine Rechte.")
         if not ctx.author.guild_permissions.moderate_members:
             return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
@@ -535,6 +550,20 @@ class ModerationCommands(commands.Cog):
         except Exception as e:
             return await self._ctx_reply(ctx, f"Timeout entfernen ging nicht: {type(e).__name__}: {e}")
         await self._ctx_reply(ctx, f"Timeout entfernt für {user.mention}.")
+
+    @commands.command(name="mute")
+    async def p_mute(self, ctx: commands.Context, user: discord.Member, minutes: int = 10, *, reason: str | None = None):
+        if not self._need_ctx(ctx):
+            return
+        if not self._has_action_access(ctx.author, "mute"):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.moderate_members:
+            return await self._ctx_reply(ctx, "Dir fehlt `Moderate Members`.")
+        used = max(1, min(43200, int(minutes)))
+        ok, err, used_minutes, strikes, case_id = await self.service.timeout(ctx.guild, ctx.author, user, used, reason)
+        if not ok:
+            return await self._ctx_reply(ctx, f"Mute ging nicht: {err}")
+        await self._ctx_reply(ctx, f"Mute gesetzt: **{used_minutes}min**. Case: `{case_id}`")
 
     @commands.command(name="unban")
     async def p_unban(self, ctx: commands.Context, user_id: int, *, reason: str | None = None):
