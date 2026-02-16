@@ -160,6 +160,7 @@ class StarryBot(commands.Bot):
         self.backup_autosave_loop.start()
         self.birthday_loop.start()
         self.giveaway_loop.start()
+        self.poll_loop.start()
         self.news_loop.start()
         self.placeholder_loop.start()
         self.parlament_loop.start()
@@ -281,6 +282,13 @@ class StarryBot(commands.Bot):
         except Exception:
             pass
 
+    @tasks.loop(seconds=30.0)
+    async def poll_loop(self):
+        try:
+            await self.poll_service.tick()
+        except Exception:
+            pass
+
     @tasks.loop(seconds=60.0)
     async def news_loop(self):
         try:
@@ -334,6 +342,10 @@ class StarryBot(commands.Bot):
     @giveaway_loop.error
     async def giveaway_loop_error(self, error: Exception):
             await self._emit_bot_error("giveaway_loop", error, extra=None, guild=None)
+
+    @poll_loop.error
+    async def poll_loop_error(self, error: Exception):
+            await self._emit_bot_error("poll_loop", error, extra=None, guild=None)
 
     @news_loop.error
     async def news_loop_error(self, error: Exception):

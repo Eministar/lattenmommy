@@ -472,6 +472,27 @@ class ModerationCommands(commands.Cog):
         removed = await self.service.clear_notes(interaction.guild, interaction.user, user, n)
         await _ephemeral(interaction, f"Entfernt: **{removed}** Notiz(en).")
 
+    @app_commands.command(name="say", description="📣 𑁉 Nachricht als Bot senden")
+    @app_commands.describe(text="Nachricht", channel="Optionaler Zielkanal")
+    async def say(self, interaction: discord.Interaction, text: str, channel: discord.TextChannel | None = None):
+        if not self._need_guild(interaction):
+            return
+        if not is_staff(self.bot.settings, interaction.user):
+            return await _ephemeral(interaction, "Keine Rechte.")
+        if not interaction.user.guild_permissions.manage_messages:
+            return await _ephemeral(interaction, "Dir fehlt `Manage Messages`.")
+        content = str(text or "").strip()
+        if not content:
+            return await _ephemeral(interaction, "Text darf nicht leer sein.")
+        target = channel if isinstance(channel, discord.TextChannel) else interaction.channel
+        if not isinstance(target, discord.TextChannel):
+            return await _ephemeral(interaction, "Nur in Text-Channels nutzbar.")
+        try:
+            await target.send(content)
+        except Exception as e:
+            return await _ephemeral(interaction, f"Senden fehlgeschlagen: {type(e).__name__}: {e}")
+        await _ephemeral(interaction, f"Gesendet in {target.mention}.")
+
     @commands.command(name="timeout")
     async def p_timeout(self, ctx: commands.Context, user: discord.Member, minutes: int | None = None, *, reason: str | None = None):
         if not self._need_ctx(ctx):
@@ -810,3 +831,25 @@ class ModerationCommands(commands.Cog):
         n = max(1, min(50, int(amount)))
         removed = await self.service.clear_notes(ctx.guild, ctx.author, user, n)
         await self._ctx_reply(ctx, f"Entfernt: **{removed}** Notiz(en).")
+
+    @commands.command(name="say")
+    async def p_say(self, ctx: commands.Context, *, text: str):
+        if not self._need_ctx(ctx):
+            return
+        if not is_staff(self.bot.settings, ctx.author):
+            return await self._ctx_reply(ctx, "Keine Rechte.")
+        if not ctx.author.guild_permissions.manage_messages:
+            return await self._ctx_reply(ctx, "Dir fehlt `Manage Messages`.")
+        if not isinstance(ctx.channel, discord.TextChannel):
+            return await self._ctx_reply(ctx, "Nur in Text-Channels.")
+        content = str(text or "").strip()
+        if not content:
+            return await self._ctx_reply(ctx, "Text darf nicht leer sein.")
+        try:
+            await ctx.channel.send(content)
+        except Exception as e:
+            return await self._ctx_reply(ctx, f"Senden fehlgeschlagen: {type(e).__name__}: {e}")
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass

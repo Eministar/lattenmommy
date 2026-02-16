@@ -471,9 +471,12 @@ class Database:
             message_id INTEGER,
             question TEXT NOT NULL,
             options_json TEXT NOT NULL,
+            image_url TEXT,
+            end_at TEXT,
             created_by INTEGER NOT NULL,
             status TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            closed_at TEXT
         );
         """)
         await self._conn.execute("""
@@ -485,6 +488,7 @@ class Database:
             PRIMARY KEY (poll_id, user_id)
         );
         """)
+        await self._ensure_poll_columns()
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS user_stats (
             guild_id INTEGER NOT NULL,
@@ -779,6 +783,12 @@ class Database:
         await self._ensure_column("counting_states", "last_count_value", "INTEGER")
         await self._ensure_column("counting_states", "last_count_user_id", "INTEGER")
         await self._ensure_column("counting_states", "last_count_at", "TEXT")
+        await self._conn.commit()
+
+    async def _ensure_poll_columns(self):
+        await self._ensure_column("polls", "image_url", "TEXT")
+        await self._ensure_column("polls", "end_at", "TEXT")
+        await self._ensure_column("polls", "closed_at", "TEXT")
         await self._conn.commit()
 
     async def _ensure_birthdays_global_seed(self):
@@ -1832,12 +1842,30 @@ class Database:
         rows = await cur.fetchall()
         return [int(r[0]) for r in rows if r and r[0] is not None]
 
-    async def create_poll(self, guild_id: int, channel_id: int, question: str, options_json: str, created_by: int):
+    async def create_poll(
+        self,
+        guild_id: int,
+        channel_id: int,
+        question: str,
+        options_json: str,
+        created_by: int,
+        end_at: str | None = None,
+        image_url: str | None = None,
+    ):
         created_at = await self.now_iso()
         await self._conn.execute("""
-        INSERT INTO polls (guild_id, channel_id, question, options_json, created_by, status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'open', ?);
-        """, (int(guild_id), int(channel_id), str(question), str(options_json), int(created_by), created_at))
+        INSERT INTO polls (guild_id, channel_id, question, options_json, image_url, end_at, created_by, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?);
+        """, (
+            int(guild_id),
+            int(channel_id),
+            str(question),
+            str(options_json),
+            str(image_url).strip() if image_url else None,
+            str(end_at).strip() if end_at else None,
+            int(created_by),
+            created_at,
+        ))
         await self._conn.commit()
         cur = await self._conn.execute("SELECT last_insert_rowid();")
         row = await cur.fetchone()
@@ -1851,10 +1879,17 @@ class Database:
 
     async def get_poll(self, poll_id: int):
         cur = await self._conn.execute("""
-        SELECT id, guild_id, channel_id, message_id, question, options_json, created_by, status, created_at
+        SELECT id, guild_id, channel_id, message_id, question, options_json, image_url, end_at, created_by, status, created_at, closed_at
         FROM polls WHERE id = ? LIMIT 1;
         """, (int(poll_id),))
         return await cur.fetchone()
+
+    async def close_poll(self, poll_id: int):
+        closed_at = await self.now_iso()
+        await self._conn.execute("""
+        UPDATE polls SET status = 'closed', closed_at = ? WHERE id = ?;
+        """, (closed_at, int(poll_id)))
+        await self._conn.commit()
 
     async def add_poll_vote(self, poll_id: int, user_id: int, option_index: int):
         voted_at = await self.now_iso()
@@ -1873,7 +1908,7 @@ class Database:
 
     async def list_open_polls(self):
         cur = await self._conn.execute("""
-        SELECT id, guild_id, channel_id, message_id, options_json
+        SELECT id, guild_id, channel_id, message_id, options_json, end_at
         FROM polls
         WHERE status = 'open';
         """)
