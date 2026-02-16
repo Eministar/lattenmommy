@@ -72,6 +72,11 @@ class ModerationCommands(commands.Cog):
             return any(r.id in configured for r in member.roles)
         return is_staff(self.bot.settings, member)
 
+    def _can_use_say(self, member: discord.Member) -> bool:
+        if member.guild_permissions.administrator:
+            return True
+        return is_staff(self.bot.settings, member) and member.guild_permissions.manage_messages
+
     def _parse_lock_mode(self, raw: str | None) -> str:
         x = str(raw or "all").strip().lower()
         if x in {"s", "send", "write", "schreiben", "w"}:
@@ -477,10 +482,8 @@ class ModerationCommands(commands.Cog):
     async def say(self, interaction: discord.Interaction, text: str, channel: discord.TextChannel | None = None):
         if not self._need_guild(interaction):
             return
-        if not is_staff(self.bot.settings, interaction.user):
+        if not self._can_use_say(interaction.user):
             return await _ephemeral(interaction, "Keine Rechte.")
-        if not interaction.user.guild_permissions.manage_messages:
-            return await _ephemeral(interaction, "Dir fehlt `Manage Messages`.")
         content = str(text or "").strip()
         if not content:
             return await _ephemeral(interaction, "Text darf nicht leer sein.")
@@ -836,17 +839,36 @@ class ModerationCommands(commands.Cog):
     async def p_say(self, ctx: commands.Context, *, text: str):
         if not self._need_ctx(ctx):
             return
-        if not is_staff(self.bot.settings, ctx.author):
+        if not self._can_use_say(ctx.author):
             return await self._ctx_reply(ctx, "Keine Rechte.")
-        if not ctx.author.guild_permissions.manage_messages:
-            return await self._ctx_reply(ctx, "Dir fehlt `Manage Messages`.")
         if not isinstance(ctx.channel, discord.TextChannel):
             return await self._ctx_reply(ctx, "Nur in Text-Channels.")
-        content = str(text or "").strip()
+        raw = str(text or "").strip()
+        if not raw:
+            return await self._ctx_reply(ctx, "Text darf nicht leer sein.")
+
+        target: discord.TextChannel = ctx.channel
+        content = raw
+        first, sep, rest = raw.partition(" ")
+        parsed_channel: discord.TextChannel | None = None
+        if first.startswith("<#") and first.endswith(">"):
+            try:
+                parsed_channel = ctx.guild.get_channel(int(first[2:-1]))
+            except Exception:
+                parsed_channel = None
+        elif first.isdigit():
+            try:
+                parsed_channel = ctx.guild.get_channel(int(first))
+            except Exception:
+                parsed_channel = None
+        if isinstance(parsed_channel, discord.TextChannel):
+            target = parsed_channel
+            content = str(rest if sep else "").strip()
+
         if not content:
             return await self._ctx_reply(ctx, "Text darf nicht leer sein.")
         try:
-            await ctx.channel.send(content)
+            await target.send(content)
         except Exception as e:
             return await self._ctx_reply(ctx, f"Senden fehlgeschlagen: {type(e).__name__}: {e}")
         try:
