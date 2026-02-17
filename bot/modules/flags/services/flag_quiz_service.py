@@ -473,7 +473,6 @@ class FlagQuizService:
         if not round_:
             return await interaction.response.send_message("Keine aktive Runde für dich.", ephemeral=True, delete_after=30)
         await self._resolve_round(interaction.guild, interaction.channel, interaction.user, round_, str(round_.code).upper() == str(code).upper())
-        await interaction.response.send_message("Antwort verarbeitet.", ephemeral=True, delete_after=30)
 
     async def _resolve_round(self, guild: discord.Guild, channel: discord.TextChannel, user: discord.abc.User, round_: ActiveRound, correct: bool):
         key = self._quiz_key(guild.id, channel.id, int(user.id))
