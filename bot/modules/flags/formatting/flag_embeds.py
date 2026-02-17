@@ -98,8 +98,9 @@ def build_result_embed(
     country_name: str,
     code: str,
     flag_url: str,
-    points: int,
-    streak: int,
+    points_gained: int,
+    total_points: int,
+    current_streak: int,
     asked: int = 0,
     right_total: int = 0,
     wrong_total: int = 0,
@@ -109,15 +110,16 @@ def build_result_embed(
         desc = (
             f"┏`👤` - User: <@{int(user_id)}>\n"
             f"┣`🌍` - Land: **{country_name}** ({code})\n"
-            f"┣`💎` - Punkte: **+{int(points)}**\n"
-            f"┣`🔥` - Streak: **{int(streak)}**\n"
+            f"┣`💎` - Punkte: **+{int(points_gained)}** (Gesamt: **{int(total_points)}**)\n"
+            f"┣`🔥` - Streak: **{int(current_streak)}**\n"
             f"┗`📊` - Flaggen-Stats: **{int(asked)}** gefragt • ✅ {int(right_total)} • ❌ {int(wrong_total)}"
         )
     else:
         desc = (
             f"┏`👤` - User: <@{int(user_id)}>\n"
             f"┣`🌍` - Lösung: **{country_name}** ({code})\n"
-            f"┣`🔥` - Streak wurde zurückgesetzt\n"
+            f"┣`💎` - Gesamtpunkte: **{int(total_points)}**\n"
+            f"┣`🔥` - Aktuelle Streak: **{int(current_streak)}**\n"
             f"┗`📊` - Flaggen-Stats: **{int(asked)}** gefragt • ✅ {int(right_total)} • ❌ {int(wrong_total)}"
         )
     emb = discord.Embed(title=title, description=desc, color=_color(settings, guild))
