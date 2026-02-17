@@ -73,12 +73,12 @@ def build_bot_status_view(
     if online:
         status = em(settings, "green", guild) or "🟢"
         header = f"**{status} 𑁉 BOT ONLINE**"
-        intro = f"{arrow2} Lattenmommy ist gestartet."
+        intro = f"{arrow2} Lattendaddy ist gestartet."
         time_line = f"┏`⏰` - Start: {format_dt(now, style='f')}\n"
     else:
         status = em(settings, "red", guild) or "🔴"
         header = f"**{status} 𑁉 BOT OFFLINE**"
-        intro = f"{arrow2} Lattenmommy fährt runter."
+        intro = f"{arrow2} Lattendaddy fährt runter."
         uptime = _format_duration((now - started_at).total_seconds()) if started_at else "—"
         time_line = f"┏`⏰` - Stop: {format_dt(now, style='f')}\n" f"┣`⌛` - Uptime: **{uptime}**\n"
 

@@ -493,7 +493,7 @@ class FlagQuizService:
             task,
             end_at,
         )
-        return True, "Runde gestartet."
+        return True
 
     async def handle_text_answer(self, message: discord.Message):
         if not message.guild or not isinstance(message.channel, discord.TextChannel):
