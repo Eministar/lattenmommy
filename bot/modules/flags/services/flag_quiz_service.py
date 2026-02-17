@@ -35,7 +35,7 @@ class ActiveRound:
 class FlagQuizService:
     TIME_LIMIT_SECONDS = 30
     POINTS_NORMAL = 10
-    POINTS_EASY = 8
+    POINTS_EASY = 3
     POINTS_DAILY = 25
     STREAK_ACHIEVEMENTS = [5, 10, 25, 50]
 
@@ -139,13 +139,14 @@ class FlagQuizService:
                 if len(code) != 2:
                     continue
                 name = str(((row or {}).get("name", {}) or {}).get("common", code)).strip() or code
-                self._code_to_name[code] = name
+                de = str((((row or {}).get("translations", {}) or {}).get("deu", {}) or {}).get("common", "")).strip()
+                # Für UI/Buttons bevorzugen wir den deutschen Ländernamen.
+                self._code_to_name[code] = de or name
                 flags = (row or {}).get("flags", {}) or {}
                 flag_url = str(flags.get("png") or "").strip()
                 if flag_url:
                     self._code_to_flag_url[code] = flag_url
                 self._alias_to_code[self._normalize(name)] = code
-                de = str((((row or {}).get("translations", {}) or {}).get("deu", {}) or {}).get("common", "")).strip()
                 if de:
                     self._alias_to_code[self._normalize(de)] = code
                 codes.append(code)
