@@ -8,6 +8,7 @@ import discord
 from discord.utils import format_dt
 
 _DURATION_RE = re.compile(r"(\d+)\s*([smhd])", re.IGNORECASE)
+_AFK_NICK_PREFIX = "AFK | "
 
 
 class ReminderAfkService:
@@ -87,6 +88,57 @@ class ReminderAfkService:
         view.add_item(c)
         return view
 
+    @staticmethod
+    def _strip_afk_prefix(name: str | None) -> str:
+        text = str(name or "")
+        if text.lower().startswith(_AFK_NICK_PREFIX.lower()):
+            return text[len(_AFK_NICK_PREFIX):].strip()
+        return text
+
+    def _can_edit_nick(self, member: discord.Member) -> bool:
+        me = member.guild.me or member.guild.get_member(getattr(self.bot.user, "id", 0))
+        if me is None:
+            return False
+        if not me.guild_permissions.manage_nicknames:
+            return False
+        if member.id == member.guild.owner_id:
+            return False
+        if me.top_role <= member.top_role:
+            return False
+        return True
+
+    async def _apply_afk_nick_prefix(self, member: discord.Member):
+        if not self._can_edit_nick(member):
+            return
+        base_name = self._strip_afk_prefix(member.nick or member.display_name or member.name).strip()
+        if not base_name:
+            base_name = member.name
+        max_base_len = max(1, 32 - len(_AFK_NICK_PREFIX))
+        desired = f"{_AFK_NICK_PREFIX}{base_name[:max_base_len]}"
+        if member.nick == desired:
+            return
+        try:
+            await member.edit(nick=desired, reason="AFK status enabled")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    async def _remove_afk_nick_prefix(self, member: discord.Member):
+        if not member.nick:
+            return
+        stripped = self._strip_afk_prefix(member.nick).strip()
+        if stripped == member.nick:
+            return
+        if not self._can_edit_nick(member):
+            return
+        target_nick: str | None = stripped or None
+        default_names = {str(member.name or "").strip().lower(), str(member.global_name or "").strip().lower()}
+        if target_nick and target_nick.strip().lower() in default_names:
+            target_nick = None
+        try:
+            await member.edit(nick=target_nick, reason="AFK status cleared")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
     async def set_afk(self, member: discord.Member, reason: str | None, time_text: str | None = None) -> tuple[bool, str, discord.ui.LayoutView | None]:
         text = (reason or "AFK").strip()[:220]
         until_at = None
@@ -98,6 +150,7 @@ class ReminderAfkService:
         await self.db.set_afk_status(member.guild.id, member.id, text, until_at=until_at)
         await self.db.clear_afk_mention_events(member.guild.id, member.id)
         self._afk_set_grace_cache[(int(member.guild.id), int(member.id))] = datetime.now(timezone.utc).timestamp()
+        await self._apply_afk_nick_prefix(member)
 
         set_at = datetime.now(timezone.utc)
         lines = [
@@ -118,6 +171,17 @@ class ReminderAfkService:
 
     async def clear_afk(self, guild_id: int, user_id: int):
         await self.db.clear_afk_status(guild_id, user_id)
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return
+        member = guild.get_member(int(user_id))
+        if member is None:
+            try:
+                member = await guild.fetch_member(int(user_id))
+            except Exception:
+                member = None
+        if member is not None:
+            await self._remove_afk_nick_prefix(member)
 
     async def get_afk_snapshot(self, guild_id: int, user_id: int) -> dict | None:
         row = await self.db.get_afk_status(guild_id, user_id)
@@ -164,6 +228,7 @@ class ReminderAfkService:
         events = await self.db.list_afk_mention_events(guild.id, user.id, limit=600)
         await self.db.clear_afk_status(guild.id, user.id)
         await self.db.clear_afk_mention_events(guild.id, user.id)
+        await self._remove_afk_nick_prefix(user)
 
         now = datetime.now(timezone.utc)
         duration_text = "unbekannt"
@@ -254,6 +319,16 @@ class ReminderAfkService:
             gid = int(row[0])
             uid = int(row[1])
             await self.db.clear_afk_status(gid, uid)
+            guild = self.bot.get_guild(gid)
+            if guild is not None:
+                member = guild.get_member(uid)
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(uid)
+                    except Exception:
+                        member = None
+                if member is not None:
+                    await self._remove_afk_nick_prefix(member)
             # Events behalten wir, damit bei nächster Nachricht eine echte Summary kommen kann.
 
     async def tick(self):
