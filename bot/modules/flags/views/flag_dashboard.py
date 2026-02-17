@@ -46,6 +46,8 @@ class FlagEasyAnswerButton(discord.ui.Button):
         service = getattr(interaction.client, "flag_quiz_service", None)
         if not service:
             return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         code = str(self.custom_id).split(":")[-1]
         await service.handle_easy_button(interaction, code)
 

@@ -28,6 +28,7 @@ class ActiveRound:
     flag_url: str
     answer_names: set[str]
     button_map: dict[str, str]
+    prompt_message_id: int
     task: asyncio.Task | None
     end_at: datetime
 
@@ -254,6 +255,51 @@ class FlagQuizService:
         best_streak = await self.db.best_flag_streak(guild.id)
         return {"players": int(players), "rounds": int(rounds), "best_streak": int(best_streak), "leader": leader}
 
+    async def sync_king_role(self, guild: discord.Guild):
+        role_id = int(self.settings.get_guild_int(guild.id, "flags.king_role_id", 0) or 0)
+        if not role_id:
+            return
+        role = guild.get_role(role_id)
+        if not role:
+            return
+
+        leader_id = 0
+        rows = await self.db.list_flag_players_top_points(guild.id, limit=1)
+        if rows:
+            leader_id = int(rows[0][0] or 0)
+        if not leader_id:
+            return
+
+        leader = guild.get_member(leader_id)
+        if not leader:
+            try:
+                leader = await guild.fetch_member(leader_id)
+            except Exception:
+                leader = None
+        if not isinstance(leader, discord.Member):
+            return
+
+        try:
+            me = guild.me or guild.get_member(getattr(self.bot.user, "id", 0))
+            if me and role >= me.top_role:
+                return
+        except Exception:
+            return
+
+        for member in list(role.members):
+            if int(member.id) == int(leader.id):
+                continue
+            try:
+                await member.remove_roles(role, reason="Flaggenkönig aktualisiert")
+            except Exception:
+                pass
+
+        if role not in leader.roles:
+            try:
+                await leader.add_roles(role, reason="Flaggenkönig (Platz 1)")
+            except Exception:
+                pass
+
     async def refresh_dashboard(self, guild: discord.Guild):
         state = await self._guild_state(guild.id)
         cid = int(state.get("channel_id", 0))
@@ -268,6 +314,7 @@ class FlagQuizService:
         if not isinstance(ch, discord.TextChannel):
             return
         await self.ensure_dashboard(guild, ch)
+        await self.sync_king_role(guild)
 
     async def ensure_dashboard(self, guild: discord.Guild, channel: discord.TextChannel):
         if not self._enabled(guild.id):
@@ -433,7 +480,19 @@ class FlagQuizService:
             await self.refresh_dashboard(guild)
 
         task = asyncio.create_task(_timeout())
-        self._rounds[key] = ActiveRound(guild.id, channel.id, user.id, mode_key, code, flag_url, answers, button_map, task, end_at)
+        self._rounds[key] = ActiveRound(
+            guild.id,
+            channel.id,
+            user.id,
+            mode_key,
+            code,
+            flag_url,
+            answers,
+            button_map,
+            int(msg.id),
+            task,
+            end_at,
+        )
         return True, "Runde gestartet."
 
     async def handle_text_answer(self, message: discord.Message):
@@ -468,12 +527,20 @@ class FlagQuizService:
         if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel) or not interaction.user:
             return
         if not self._enabled(interaction.guild.id):
-            return await interaction.response.send_message("Flaggenquiz ist deaktiviert.", ephemeral=True, delete_after=30)
+            if interaction.response.is_done():
+                await interaction.followup.send("Flaggenquiz ist deaktiviert.", ephemeral=True, delete_after=30)
+            else:
+                await interaction.response.send_message("Flaggenquiz ist deaktiviert.", ephemeral=True, delete_after=30)
+            return
         uid = int(interaction.user.id)
         key = self._quiz_key(interaction.guild.id, interaction.channel.id, uid)
         round_ = self._rounds.get(key)
         if not round_:
-            return await interaction.response.send_message("Keine aktive Runde für dich.", ephemeral=True, delete_after=30)
+            if interaction.response.is_done():
+                await interaction.followup.send("Keine aktive Runde für dich.", ephemeral=True, delete_after=30)
+            else:
+                await interaction.response.send_message("Keine aktive Runde für dich.", ephemeral=True, delete_after=30)
+            return
         await self._resolve_round(interaction.guild, interaction.channel, interaction.user, round_, str(round_.code).upper() == str(code).upper())
 
     async def _resolve_round(self, guild: discord.Guild, channel: discord.TextChannel, user: discord.abc.User, round_: ActiveRound, correct: bool):
@@ -481,6 +548,10 @@ class FlagQuizService:
         self._rounds.pop(key, None)
         if round_.task:
             round_.task.cancel()
+        try:
+            await channel.get_partial_message(int(round_.prompt_message_id)).delete()
+        except Exception:
+            pass
         ps = await self._get_player_stats(guild.id, int(user.id))
         name = self._name_for(round_.code)
         if correct:
@@ -512,7 +583,7 @@ class FlagQuizService:
                     wrong_total=int(fstats["wrong"]),
                 ),
                 view=self._build_replay_view(),
-                delete_after=30,
+                delete_after=10,
             )
             await self._check_streak_achievements(guild, user, int(ps["current_streak"]))
         else:
@@ -539,8 +610,9 @@ class FlagQuizService:
                     wrong_total=int(fstats["wrong"]),
                 ),
                 view=self._build_replay_view(),
-                delete_after=30,
+                delete_after=10,
             )
+        await self.sync_king_role(guild)
         await self.refresh_dashboard(guild)
 
     def _build_replay_view(self):

@@ -47,6 +47,20 @@ class FlagCommands(commands.Cog):
         await self.service.ensure_dashboard(interaction.guild, target)
         await interaction.edit_original_response(content=f"Flaggen-Panel in {target.mention} aktualisiert.")
 
+    @flag.command(name="kingrole", description="👑 𑁉 Rolle für den aktuellen Flaggenkönig setzen")
+    @app_commands.describe(role="Rolle, die immer der Erstplatzierte tragen soll")
+    async def kingrole(self, interaction: discord.Interaction, role: discord.Role):
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
+        if not is_staff(self.bot.settings, interaction.user):
+            return await interaction.response.send_message("Keine Rechte.", ephemeral=True, delete_after=30)
+        if not self.service:
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
+        await interaction.response.defer(ephemeral=True)
+        await self.bot.settings.set_guild_override(self.bot.db, interaction.guild.id, "flags.king_role_id", int(role.id))
+        await self.service.sync_king_role(interaction.guild)
+        await interaction.edit_original_response(content=f"Flaggenkönig-Rolle gesetzt: {role.mention}")
+
     @flag.command(name="start", description="🎯 𑁉 Neues Flaggenrätsel starten")
     @app_commands.describe(mode="normal / easy")
     @app_commands.choices(mode=[
