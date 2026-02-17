@@ -43,6 +43,8 @@ from bot.modules.welcome.services.welcome_service import WelcomeService
 from bot.modules.ai.cogs.mention_ai_listener import MentionAIListener
 from bot.modules.ai.cogs.ai_commands import AICommands
 from bot.modules.ai.services.deepseek_service import DeepSeekService
+from bot.modules.automod.cogs.automod_listener import AutoModListener
+from bot.modules.automod.services.automod_service import AutoModService
 from bot.modules.counting.cogs.counting_listener import CountingListener
 from bot.modules.counting.cogs.counting_commands import CountingCommands
 from bot.modules.counting.services.counting_service import CountingService
@@ -140,6 +142,7 @@ class StarryBot(commands.Bot):
         self.welcome_service = WelcomeService(self, self.settings, self.db, self.logger)
         self.wzs_service = WortZumSonntagService(self, self.settings, self.db, self.logger)
         self.deepseek_service = DeepSeekService(self, self.settings, self.logger)
+        self.automod_service = AutoModService(self, self.settings, self.db, self.logger)
         self.counting_service = CountingService(self, self.settings, self.db, self.logger)
         self.suggestion_service = SuggestionService(self, self.settings, self.db, self.logger)
         self.seelsorge_service = SeelsorgeService(self, self.settings, self.db, self.logger)
@@ -189,6 +192,7 @@ class StarryBot(commands.Bot):
         await self.add_cog(TempVoiceCommands(self))
         await self.add_cog(NewsCommands(self))
         await self.add_cog(WelcomeListener(self))
+        await self.add_cog(AutoModListener(self))
         await self.add_cog(MentionAIListener(self))
         await self.add_cog(AICommands(self))
         await self.add_cog(CountingListener(self))

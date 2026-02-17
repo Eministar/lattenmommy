@@ -18,6 +18,8 @@ class MentionAIListener(commands.Cog):
             return
         if not message.content:
             return
+        if message.reference:
+            return
         if message.author.bot:
             return
         if message.mention_everyone:
