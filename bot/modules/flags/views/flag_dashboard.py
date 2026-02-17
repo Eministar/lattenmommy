@@ -26,6 +26,9 @@ class FlagDashboardButton(discord.ui.Button):
             return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         if action in {"normal", "easy", "daily"}:
             ok, msg = await service.start_round(interaction.guild, interaction.channel, interaction.user, action)
+            if ok:
+                await interaction.response.defer()
+                return
             return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
         if action == "leaderboard":
             rows = await interaction.client.db.list_flag_players_top_points(interaction.guild.id, limit=10)
@@ -87,6 +90,9 @@ class FlagReplayButton(discord.ui.Button):
             return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         action = str(self.custom_id).split(":")[-1]
         ok, msg = await service.start_round(interaction.guild, interaction.channel, interaction.user, action)
+        if ok:
+            await interaction.response.defer()
+            return
         await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
 
 
