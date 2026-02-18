@@ -6,6 +6,7 @@ import re
 import math
 import operator as op
 import time
+import unicodedata
 from dataclasses import dataclass
 
 import discord
@@ -32,10 +33,17 @@ _ALLOWED_FUNCS: dict[str, object] = {
     "tan": math.tan,
     "log": math.log,
     "log10": math.log10,
+    "cbrt": lambda x: x ** (1.0 / 3.0),
+    "qroot": lambda x: x ** 0.25,
+    "sigma": lambda *args: sum(args),
+    "product": lambda *args: math.prod(args) if args else 1,
+    "approx": lambda a, b: math.isclose(a, b, rel_tol=0.03, abs_tol=0.15),
+    "proportional": lambda a, b: bool(a) and bool(b),
 }
 _ALLOWED_CONSTS: dict[str, float] = {
     "pi": math.pi,
     "e": math.e,
+    "inf": math.inf,
 }
 _BIN_OPS: dict[type[ast.AST], object] = {
     ast.Add: op.add,
@@ -49,6 +57,56 @@ _BIN_OPS: dict[type[ast.AST], object] = {
 _UNARY_OPS: dict[type[ast.AST], object] = {
     ast.UAdd: op.pos,
     ast.USub: op.neg,
+}
+_UNICODE_OP_TRANSLATIONS: dict[int, str] = {
+    ord("×"): "*",
+    ord("✕"): "*",
+    ord("✖"): "*",
+    ord("⋅"): "*",
+    ord("·"): "*",
+    ord("∙"): "*",
+    ord("∗"): "*",
+    ord("＊"): "*",
+    ord("÷"): "/",
+    ord("∕"): "/",
+    ord("／"): "/",
+    ord("−"): "-",
+    ord("﹣"): "-",
+    ord("－"): "-",
+    ord("–"): "-",
+    ord("—"): "-",
+    ord("＋"): "+",
+    ord("⊕"): "+",
+    ord("⨁"): "+",
+    ord("∔"): "+",
+    ord("＝"): "=",
+    ord("≠"): "!=",
+    ord("≤"): "<=",
+    ord("≥"): ">=",
+    ord("≡"): "==",
+    ord("＾"): "^",
+    ord("，"): ",",
+    ord("٫"): ".",
+    ord("⁄"): "/",
+    ord("⨉"): "*",
+    ord("⊗"): "*",
+    ord("∸"): "-",
+    ord("∖"): "/",
+    ord("∞"): "inf",
+}
+_SUPERSCRIPT_MAP: dict[str, str] = {
+    "⁰": "0",
+    "¹": "1",
+    "²": "2",
+    "³": "3",
+    "⁴": "4",
+    "⁵": "5",
+    "⁶": "6",
+    "⁷": "7",
+    "⁸": "8",
+    "⁹": "9",
+    "⁺": "+",
+    "⁻": "-",
 }
 
 
@@ -152,8 +210,103 @@ class CountingService:
             return False
         return any(ch.isdigit() for ch in content)
 
+    def _expand_superscript_powers(self, content: str) -> str:
+        out: list[str] = []
+        i = 0
+        while i < len(content):
+            ch = content[i]
+            if ch in _SUPERSCRIPT_MAP:
+                j = i
+                parts: list[str] = []
+                while j < len(content) and content[j] in _SUPERSCRIPT_MAP:
+                    parts.append(_SUPERSCRIPT_MAP[content[j]])
+                    j += 1
+                sup = "".join(parts)
+                prev = out[-1] if out else ""
+                if prev and prev[-1] in "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_).":
+                    out.append(f"**({sup})")
+                else:
+                    out.append(sup)
+                i = j
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    def _split_top_level(self, expr: str, delimiter: str) -> list[str]:
+        parts: list[str] = []
+        depth = 0
+        start = 0
+        for i, ch in enumerate(expr):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth = max(0, depth - 1)
+            elif ch == delimiter and depth == 0:
+                chunk = expr[start:i].strip()
+                if chunk:
+                    parts.append(chunk)
+                start = i + 1
+        last = expr[start:].strip()
+        if last:
+            parts.append(last)
+        return parts
+
+    def _replace_top_level_binary(self, expr: str, symbol: str, fn_name: str) -> str:
+        depth = 0
+        for i, ch in enumerate(expr):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth = max(0, depth - 1)
+            elif ch == symbol and depth == 0:
+                left = expr[:i].strip()
+                right = expr[i + 1 :].strip()
+                if left and right:
+                    return f"{fn_name}(({left}),({right}))"
+        return expr
+
+    def _expand_root_symbols(self, expr: str) -> str:
+        prev = None
+        while expr != prev:
+            prev = expr
+            expr = re.sub(r"∛\s*(\([^()]*\)|[A-Za-z0-9_.]+)", r"cbrt(\1)", expr)
+            expr = re.sub(r"∜\s*(\([^()]*\)|[A-Za-z0-9_.]+)", r"qroot(\1)", expr)
+            expr = re.sub(r"√\s*(\([^()]*\)|[A-Za-z0-9_.]+)", r"sqrt(\1)", expr)
+        return expr
+
+    def _expand_aggregate_prefix(self, expr: str) -> str:
+        trimmed = expr.strip()
+        if trimmed.startswith("∑"):
+            rest = trimmed[1:].strip()
+            terms = self._split_top_level(rest, "+")
+            if len(terms) >= 2:
+                return f"sigma({','.join(terms)})"
+        if trimmed.startswith("∏"):
+            rest = trimmed[1:].strip()
+            terms = self._split_top_level(rest, "*")
+            if len(terms) >= 2:
+                return f"product({','.join(terms)})"
+        return expr
+
+    def _normalize_expression_input(self, content: str) -> str:
+        expr = self._expand_superscript_powers(str(content or ""))
+        expr = self._expand_root_symbols(expr)
+        expr = self._replace_top_level_binary(expr, "≈", "approx")
+        expr = self._replace_top_level_binary(expr, "∝", "proportional")
+        expr = unicodedata.normalize("NFKC", expr)
+        expr = expr.translate(_UNICODE_OP_TRANSLATIONS)
+        expr = re.sub(r"(?<=[\d\)])\s*[xX]\s*(?=[\d\(])", "*", expr)
+        expr = re.sub(r"(?<=\))(?=[(0-9])", "*", expr)
+        expr = re.sub(r"(?<=\d)(?=\()", "*", expr)
+        expr = re.sub(r"\s+", "", expr)
+        expr = expr.replace("^", "**")
+        expr = re.sub(r"(?<=\d),(?=\d)", ".", expr)
+        return expr
+
     def _extract_single_int(self, content: str) -> int | None:
-        nums = re.findall(r"\d+", content)
+        normalized = self._normalize_expression_input(content)
+        nums = re.findall(r"\d+", normalized)
         if len(nums) != 1:
             return None
         try:
@@ -209,19 +362,51 @@ class CountingService:
             except Exception:
                 return None
 
+        if isinstance(node, ast.Compare):
+            left = self._eval_ast(node.left)
+            if left is None:
+                return None
+            current = left
+            for op_node, comparator in zip(node.ops, node.comparators):
+                right = self._eval_ast(comparator)
+                if right is None:
+                    return None
+                ok = None
+                if isinstance(op_node, ast.Eq):
+                    ok = current == right
+                elif isinstance(op_node, ast.NotEq):
+                    ok = current != right
+                elif isinstance(op_node, ast.Lt):
+                    ok = current < right
+                elif isinstance(op_node, ast.LtE):
+                    ok = current <= right
+                elif isinstance(op_node, ast.Gt):
+                    ok = current > right
+                elif isinstance(op_node, ast.GtE):
+                    ok = current >= right
+                if ok is None or not ok:
+                    return False
+                current = right
+            return True
+
         return None
 
     def evaluate_expression(self, content: str) -> int | None:
         try:
-            expr = content.replace(" ", "").replace("^", "**").replace(",", ".")
-            parts = [p for p in expr.split("=") if p != ""]
+            expr = self._normalize_expression_input(content)
+            parts = [p for p in re.split(r"(?<![<>=!])=(?!=)", expr) if p != ""]
             if not parts:
                 return None
             values: list[int] = []
             for part in parts:
+                part = self._expand_aggregate_prefix(part)
                 node = ast.parse(part, mode="eval")
                 value = self._eval_ast(node)
-                if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+                if value is None:
+                    return None
+                if isinstance(value, bool):
+                    value = int(value)
+                if not isinstance(value, (int, float)):
                     return None
                 if not math.isfinite(value):
                     return None
