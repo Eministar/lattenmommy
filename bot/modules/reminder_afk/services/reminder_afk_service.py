@@ -95,32 +95,43 @@ class ReminderAfkService:
             return text[len(_AFK_NICK_PREFIX):].strip()
         return text
 
-    def _can_edit_nick(self, member: discord.Member) -> bool:
-        me = member.guild.me or member.guild.get_member(getattr(self.bot.user, "id", 0))
-        if me is None:
-            return False
-        if not me.guild_permissions.manage_nicknames:
-            return False
-        if member.id == member.guild.owner_id:
-            return False
-        if me.top_role <= member.top_role:
-            return False
-        return True
+    async def _get_bot_member(self, guild: discord.Guild) -> discord.Member | None:
+        me = guild.me or guild.get_member(getattr(self.bot.user, "id", 0))
+        if me is not None:
+            return me
+        try:
+            return await guild.fetch_member(int(getattr(self.bot.user, "id", 0)))
+        except Exception:
+            return None
 
-    async def _apply_afk_nick_prefix(self, member: discord.Member):
-        if not self._can_edit_nick(member):
-            return
+    async def _can_edit_nick(self, member: discord.Member) -> tuple[bool, str | None]:
+        me = await self._get_bot_member(member.guild)
+        if me is None:
+            return False, "Bot-Mitglied konnte nicht geladen werden."
+        if not me.guild_permissions.manage_nicknames:
+            return False, "Fehlende Berechtigung: `Manage Nicknames`."
+        if member.id == member.guild.owner_id:
+            return False, "Server-Owner kann nicht umbenannt werden."
+        if me.top_role <= member.top_role:
+            return False, "Rollen-Hierarchie blockiert die Umbenennung."
+        return True, None
+
+    async def _apply_afk_nick_prefix(self, member: discord.Member) -> tuple[bool, str | None]:
+        can_edit, reason = await self._can_edit_nick(member)
+        if not can_edit:
+            return False, reason
         base_name = self._strip_afk_prefix(member.nick or member.display_name or member.name).strip()
         if not base_name:
             base_name = member.name
         max_base_len = max(1, 32 - len(_AFK_NICK_PREFIX))
         desired = f"{_AFK_NICK_PREFIX}{base_name[:max_base_len]}"
         if member.nick == desired:
-            return
+            return True, None
         try:
             await member.edit(nick=desired, reason="AFK status enabled")
+            return True, None
         except (discord.Forbidden, discord.HTTPException):
-            pass
+            return False, "Discord hat die Umbenennung abgelehnt (Forbidden/HTTPException)."
 
     async def _remove_afk_nick_prefix(self, member: discord.Member):
         if not member.nick:
@@ -128,7 +139,8 @@ class ReminderAfkService:
         stripped = self._strip_afk_prefix(member.nick).strip()
         if stripped == member.nick:
             return
-        if not self._can_edit_nick(member):
+        can_edit, _ = await self._can_edit_nick(member)
+        if not can_edit:
             return
         target_nick: str | None = stripped or None
         default_names = {str(member.name or "").strip().lower(), str(member.global_name or "").strip().lower()}
@@ -150,7 +162,7 @@ class ReminderAfkService:
         await self.db.set_afk_status(member.guild.id, member.id, text, until_at=until_at)
         await self.db.clear_afk_mention_events(member.guild.id, member.id)
         self._afk_set_grace_cache[(int(member.guild.id), int(member.id))] = datetime.now(timezone.utc).timestamp()
-        await self._apply_afk_nick_prefix(member)
+        nick_ok, nick_reason = await self._apply_afk_nick_prefix(member)
 
         set_at = datetime.now(timezone.utc)
         lines = [
@@ -167,6 +179,8 @@ class ReminderAfkService:
         else:
             lines.append("┗`⏳` - Ende: manuell oder bei nächster Nachricht")
         view = self._container_view(member.guild, "💤 𑁉 AFK AKTIV", ["\n".join(lines)])
+        if not nick_ok:
+            return True, f"AFK gesetzt. Nickname-Update fehlgeschlagen: {nick_reason or 'unbekannt'}", view
         return True, "AFK gesetzt.", view
 
     async def clear_afk(self, guild_id: int, user_id: int):
