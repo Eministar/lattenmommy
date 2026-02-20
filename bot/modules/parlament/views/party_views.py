@@ -200,7 +200,7 @@ class PartySettingsPanelView(discord.ui.LayoutView):
         container.add_item(
             discord.ui.TextDisplay(
                 "**⚙️ 𑁉 PARTEI-EINSTELLUNGEN**\n"
-                "Hier verwaltet ihr eure Partei.\n\n"
+                "Dieses Panel gehört in euren Partei-Panel-Channel.\n\n"
                 "┏`🖼️` - Logo hinterlegen\n"
                 "┣`📜` - Parteiprogramm in den Parteithread senden\n"
                 "┣`➕` - Mitglieder hinzufügen\n"

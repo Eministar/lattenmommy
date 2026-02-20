@@ -675,17 +675,21 @@ class ParliamentService:
         category_name = f"{self._party_category_prefix(interaction.guild.id)} • {party[2]}"[:95]
         overwrites = self._party_overwrites(interaction.guild, member_ids)
         category = await interaction.guild.create_category(name=category_name, overwrites=overwrites, reason=f"Partei genehmigt #{party_id}")
-        text_channel = await interaction.guild.create_text_channel(name="allgemein", category=category, reason=f"Partei #{party_id}")
-        settings_channel = await interaction.guild.create_text_channel(name="einstellungen", category=category, reason=f"Partei #{party_id}")
+        panel_channel = await interaction.guild.create_text_channel(name="panel", category=category, reason=f"Partei #{party_id}")
+        text_channel = await interaction.guild.create_text_channel(name="text", category=category, reason=f"Partei #{party_id}")
         voice_channel = await interaction.guild.create_voice_channel(name="voice", category=category, reason=f"Partei #{party_id}")
 
-        settings_msg = await settings_channel.send(view=PartySettingsPanelView())
+        settings_msg = await panel_channel.send(view=PartySettingsPanelView())
+        await text_channel.send(
+            f"Willkommen im Parteikanal von **{party[2]}**.\n"
+            f"Organisation und Verwaltung läuft in {panel_channel.mention}."
+        )
 
         await self.db.set_parliament_party_channels(
             int(party[0]),
             category_id=int(category.id),
             text_channel_id=int(text_channel.id),
-            settings_channel_id=int(settings_channel.id),
+            settings_channel_id=int(panel_channel.id),
             voice_channel_id=int(voice_channel.id),
             settings_message_id=int(settings_msg.id),
         )
@@ -708,7 +712,9 @@ class ParliamentService:
             await thread.send(
                 f"✅ Partei genehmigt durch {interaction.user.mention}.\n"
                 f"Kategorie: {category.mention}\n"
-                f"Einstellungen: {settings_channel.mention}"
+                f"Panel: {panel_channel.mention}\n"
+                f"Text: {text_channel.mention}\n"
+                f"Voice: {voice_channel.mention}"
             )
 
         await interaction.response.send_message(f"Partei **#{party_id} {party[2]}** wurde genehmigt.", ephemeral=True)
