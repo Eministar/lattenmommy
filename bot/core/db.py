@@ -694,6 +694,62 @@ class Database:
         );
         """)
         await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS parliament_parties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            founder_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            description TEXT,
+            logo_url TEXT,
+            manifesto_text TEXT,
+            forum_thread_id INTEGER,
+            category_id INTEGER,
+            text_channel_id INTEGER,
+            settings_channel_id INTEGER,
+            voice_channel_id INTEGER,
+            settings_message_id INTEGER,
+            created_at TEXT NOT NULL,
+            approved_by INTEGER,
+            approved_at TEXT,
+            rejected_by INTEGER,
+            rejected_at TEXT,
+            rejection_reason TEXT
+        );
+        """)
+        if self._driver == "mysql":
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parliament_parties_status ON parliament_parties(guild_id, status(32))")
+            await self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_parliament_parties_slug ON parliament_parties(guild_id, slug(120))")
+        else:
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parliament_parties_status ON parliament_parties(guild_id, status)")
+            await self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_parliament_parties_slug ON parliament_parties(guild_id, slug)")
+        await self._conn.execute("""
+        CREATE TABLE IF NOT EXISTS parliament_party_members (
+            party_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            added_by INTEGER,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY (party_id, user_id)
+        );
+        """)
+        if self._driver == "mysql":
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parliament_party_members_user ON parliament_party_members(guild_id, user_id)")
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parliament_party_members_party_role ON parliament_party_members(party_id, role(32))")
+        else:
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parliament_party_members_user ON parliament_party_members(guild_id, user_id)")
+            await self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parliament_party_members_party_role ON parliament_party_members(party_id, role)")
+        await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS flag_quiz_guilds (
             guild_id INTEGER NOT NULL,
             quiz_channel_id INTEGER,
@@ -2353,6 +2409,242 @@ class Database:
             FROM parliament_votes
             WHERE status = 'open';
             """,
+        )
+        return await cur.fetchall()
+
+    async def create_parliament_party(
+        self,
+        guild_id: int,
+        name: str,
+        slug: str,
+        founder_id: int,
+        description: str | None = None,
+        forum_thread_id: int | None = None,
+    ) -> int:
+        created_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT INTO parliament_parties
+            (guild_id, name, slug, founder_id, status, description, forum_thread_id, created_at)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?);
+            """,
+            (
+                int(guild_id),
+                str(name),
+                str(slug),
+                int(founder_id),
+                str(description or "").strip() or None,
+                int(forum_thread_id) if forum_thread_id else None,
+                str(created_at),
+            ),
+        )
+        await self._conn.commit()
+        cur = await self._conn.execute("SELECT last_insert_rowid();")
+        row = await cur.fetchone()
+        return int(row[0])
+
+    async def get_parliament_party(self, party_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                   settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+            FROM parliament_parties
+            WHERE id = ?
+            LIMIT 1;
+            """,
+            (int(party_id),),
+        )
+        return await cur.fetchone()
+
+    async def get_parliament_party_by_slug(self, guild_id: int, slug: str):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                   settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+            FROM parliament_parties
+            WHERE guild_id = ? AND slug = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), str(slug)),
+        )
+        return await cur.fetchone()
+
+    async def list_parliament_parties(self, guild_id: int, status: str | None = None, limit: int = 200):
+        if status:
+            cur = await self._conn.execute(
+                """
+                SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                       forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                       settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                FROM parliament_parties
+                WHERE guild_id = ? AND status = ?
+                ORDER BY id DESC
+                LIMIT ?;
+                """,
+                (int(guild_id), str(status), int(limit)),
+            )
+        else:
+            cur = await self._conn.execute(
+                """
+                SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                       forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                       settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                FROM parliament_parties
+                WHERE guild_id = ?
+                ORDER BY id DESC
+                LIMIT ?;
+                """,
+                (int(guild_id), int(limit)),
+            )
+        return await cur.fetchall()
+
+    async def get_parliament_party_for_user(self, guild_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT p.id, p.guild_id, p.name, p.slug, p.founder_id, p.status, p.description, p.logo_url, p.manifesto_text,
+                   p.forum_thread_id, p.category_id, p.text_channel_id, p.settings_channel_id, p.voice_channel_id,
+                   p.settings_message_id, p.created_at, p.approved_by, p.approved_at, p.rejected_by, p.rejected_at, p.rejection_reason
+            FROM parliament_parties p
+            JOIN parliament_party_members m ON m.party_id = p.id
+            WHERE p.guild_id = ? AND m.guild_id = ? AND m.user_id = ?
+              AND p.status IN ('pending', 'approved')
+            ORDER BY p.id DESC
+            LIMIT 1;
+            """,
+            (int(guild_id), int(guild_id), int(user_id)),
+        )
+        return await cur.fetchone()
+
+    async def get_parliament_party_by_settings_channel(self, guild_id: int, settings_channel_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                   settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+            FROM parliament_parties
+            WHERE guild_id = ? AND settings_channel_id = ?
+            LIMIT 1;
+            """,
+            (int(guild_id), int(settings_channel_id)),
+        )
+        return await cur.fetchone()
+
+    async def set_parliament_party_status_approved(self, party_id: int, approved_by: int):
+        approved_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET status = 'approved', approved_by = ?, approved_at = ?, rejected_by = NULL, rejected_at = NULL, rejection_reason = NULL
+            WHERE id = ?;
+            """,
+            (int(approved_by), str(approved_at), int(party_id)),
+        )
+        await self._conn.commit()
+
+    async def set_parliament_party_status_rejected(self, party_id: int, rejected_by: int, reason: str | None = None):
+        rejected_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET status = 'rejected', rejected_by = ?, rejected_at = ?, rejection_reason = ?
+            WHERE id = ?;
+            """,
+            (int(rejected_by), str(rejected_at), str(reason or "").strip() or None, int(party_id)),
+        )
+        await self._conn.commit()
+
+    async def set_parliament_party_logo(self, party_id: int, logo_url: str | None):
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET logo_url = ?
+            WHERE id = ?;
+            """,
+            (str(logo_url or "").strip() or None, int(party_id)),
+        )
+        await self._conn.commit()
+
+    async def set_parliament_party_manifesto(self, party_id: int, manifesto_text: str | None):
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET manifesto_text = ?
+            WHERE id = ?;
+            """,
+            (str(manifesto_text or "").strip() or None, int(party_id)),
+        )
+        await self._conn.commit()
+
+    async def set_parliament_party_channels(
+        self,
+        party_id: int,
+        category_id: int | None = None,
+        text_channel_id: int | None = None,
+        settings_channel_id: int | None = None,
+        voice_channel_id: int | None = None,
+        settings_message_id: int | None = None,
+    ):
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET category_id = ?, text_channel_id = ?, settings_channel_id = ?, voice_channel_id = ?, settings_message_id = ?
+            WHERE id = ?;
+            """,
+            (
+                int(category_id) if category_id else None,
+                int(text_channel_id) if text_channel_id else None,
+                int(settings_channel_id) if settings_channel_id else None,
+                int(voice_channel_id) if voice_channel_id else None,
+                int(settings_message_id) if settings_message_id else None,
+                int(party_id),
+            ),
+        )
+        await self._conn.commit()
+
+    async def add_parliament_party_member(self, party_id: int, guild_id: int, user_id: int, role: str, added_by: int | None = None):
+        added_at = await self.now_iso()
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO parliament_party_members (party_id, guild_id, user_id, role, added_by, added_at)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (int(party_id), int(guild_id), int(user_id), str(role), int(added_by) if added_by else None, str(added_at)),
+        )
+        await self._conn.commit()
+
+    async def remove_parliament_party_member(self, party_id: int, user_id: int):
+        await self._conn.execute(
+            """
+            DELETE FROM parliament_party_members
+            WHERE party_id = ? AND user_id = ?;
+            """,
+            (int(party_id), int(user_id)),
+        )
+        await self._conn.commit()
+
+    async def get_parliament_party_member(self, party_id: int, user_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT party_id, guild_id, user_id, role, added_by, added_at
+            FROM parliament_party_members
+            WHERE party_id = ? AND user_id = ?
+            LIMIT 1;
+            """,
+            (int(party_id), int(user_id)),
+        )
+        return await cur.fetchone()
+
+    async def list_parliament_party_members(self, party_id: int):
+        cur = await self._conn.execute(
+            """
+            SELECT party_id, guild_id, user_id, role, added_by, added_at
+            FROM parliament_party_members
+            WHERE party_id = ?
+            ORDER BY CASE WHEN role = 'leader' THEN 0 ELSE 1 END, user_id ASC;
+            """,
+            (int(party_id),),
         )
         return await cur.fetchall()
 

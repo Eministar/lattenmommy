@@ -82,6 +82,7 @@ from bot.modules.invites.services.invite_service import InviteService
 from bot.modules.invites.cogs.invite_listener import InviteListener
 from bot.modules.parlament.services.parlament_service import ParliamentService
 from bot.modules.parlament.cogs.parlament_commands import ParliamentCommands
+from bot.modules.parlament.views.party_views import PartyCreatePanelView, PartySettingsPanelView
 from bot.modules.bot_status.services.bot_status_service import BotStatusService
 
 from bot.core.presence import PresenceRotator
@@ -226,6 +227,8 @@ class StarryBot(commands.Bot):
         self.add_view(SeelsorgePanelView(self.seelsorge_service))
         self.add_view(BeichteInfoView(self.beichte_service))
         self.add_view(FlagDashboardPersistentView())
+        self.add_view(PartyCreatePanelView())
+        self.add_view(PartySettingsPanelView())
 
         @self.tree.error
         async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):

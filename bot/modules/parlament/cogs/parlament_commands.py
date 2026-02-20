@@ -13,6 +13,7 @@ class ParliamentCommands(commands.Cog):
     parlament = app_commands.Group(name="parlament", description="🏛️ 𑁉 Parlament")
     start = app_commands.Group(name="start", description="Start", parent=parlament)
     stop = app_commands.Group(name="stop", description="Stop", parent=parlament)
+    partei = app_commands.Group(name="partei", description="Partei-System", parent=parlament)
 
     @start.command(name="vote", description="🗳️ 𑁉 Votum starten")
     async def start_vote(self, interaction: discord.Interaction):
@@ -28,3 +29,21 @@ class ParliamentCommands(commands.Cog):
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
         await self.service.update_panel(interaction.guild)
         await interaction.response.send_message("Panel aktualisiert.", ephemeral=True)
+
+    @partei.command(name="panel", description="📌 𑁉 Partei-Gründungs-Panel senden")
+    async def party_panel(self, interaction: discord.Interaction):
+        await self.service.create_party_panel(interaction)
+
+    @partei.command(name="approve", description="✅ 𑁉 Partei genehmigen")
+    @app_commands.describe(party_id="ID der Partei")
+    async def party_approve(self, interaction: discord.Interaction, party_id: int):
+        await self.service.approve_party(interaction, int(party_id))
+
+    @partei.command(name="reject", description="❌ 𑁉 Partei ablehnen")
+    @app_commands.describe(party_id="ID der Partei", reason="Optionaler Ablehnungsgrund")
+    async def party_reject(self, interaction: discord.Interaction, party_id: int, reason: str | None = None):
+        await self.service.reject_party(interaction, int(party_id), reason=reason)
+
+    @partei.command(name="list", description="📋 𑁉 Parteien anzeigen")
+    async def party_list(self, interaction: discord.Interaction):
+        await self.service.list_parties(interaction)
