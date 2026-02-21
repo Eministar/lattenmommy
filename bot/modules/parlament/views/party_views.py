@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import discord
+from bot.utils.assets import Banners
+from bot.utils.emojis import em
 
 
 class PartyCreateModal(discord.ui.Modal):
@@ -282,13 +284,31 @@ class PartySyncInfoButton(discord.ui.Button):
 
 
 class PartySettingsPanelView(discord.ui.LayoutView):
-    def __init__(self):
+    def __init__(self, settings=None, guild: discord.Guild | None = None):
         super().__init__(timeout=None)
-        container = discord.ui.Container(accent_colour=0xB16B91)
+        raw = "#B16B91"
+        if settings and guild:
+            raw = str(settings.get_guild(guild.id, "design.accent_color", "#B16B91") or "#B16B91")
+        elif settings:
+            raw = str(settings.get("design.accent_color", "#B16B91") or "#B16B91")
+        try:
+            color = int(raw.replace("#", "").strip(), 16)
+        except Exception:
+            color = 0xB16B91
+        arrow2 = em(settings, "arrow2", guild) if settings else "»"
+        arrow2 = arrow2 or "»"
+        container = discord.ui.Container(accent_colour=color)
+        try:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=Banners.PARLIAMENT)
+            container.add_item(gallery)
+            container.add_item(discord.ui.Separator())
+        except Exception:
+            pass
         container.add_item(
             discord.ui.TextDisplay(
                 "**⚙️ 𑁉 PARTEI-EINSTELLUNGEN**\n"
-                "Dieses Panel gehört in euren Partei-Panel-Channel.\n\n"
+                f"{arrow2} Dieses Panel gehört in euren Partei-Panel-Channel.\n\n"
                 "┏`🖼️` - Logo hinterlegen\n"
                 "┣`📜` - Programm direkt posten (Text/PDF im Panel-Channel)\n"
                 "┣`📝` - Name/Beschreibung anpassen\n"

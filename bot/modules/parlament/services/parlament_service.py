@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import discord
 
 from bot.core.perms import is_staff
+from bot.utils.assets import Banners
+from bot.utils.emojis import em
 from bot.modules.parlament.formatting.parlament_embeds import (
     build_parliament_panel_embed,
     build_parliament_vote_container,
@@ -508,6 +510,17 @@ class ParliamentService:
                     return url
         return None
 
+    def _color(self, guild_id: int | None = None) -> int:
+        if guild_id:
+            raw = str(self.settings.get_guild(guild_id, "design.accent_color", "#B16B91") or "")
+        else:
+            raw = str(self.settings.get("design.accent_color", "#B16B91") or "")
+        value = raw.replace("#", "").strip()
+        try:
+            return int(value, 16)
+        except Exception:
+            return 0xB16B91
+
     def _extract_user_ids(self, text: str) -> list[int]:
         found = set()
         for raw in re.findall(r"\d{5,22}", str(text or "")):
@@ -557,10 +570,19 @@ class ParliamentService:
         self,
         guild: discord.Guild,
         member_ids: list[int],
+        party_role: discord.Role | None = None,
     ) -> dict[discord.abc.Snowflake, discord.PermissionOverwrite]:
         overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False)
         }
+        if party_role:
+            overwrites[party_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                connect=True,
+                speak=True,
+            )
         for role_id in self._party_team_role_ids(guild.id):
             role = guild.get_role(int(role_id))
             if not role:
@@ -590,10 +612,19 @@ class ParliamentService:
         guild: discord.Guild,
         leader_id: int,
         member_ids: list[int],
+        party_role: discord.Role | None = None,
     ) -> dict[discord.abc.Snowflake, discord.PermissionOverwrite]:
         overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False)
         }
+        if party_role:
+            overwrites[party_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,
+                attach_files=False,
+                embed_links=False,
+                read_message_history=True,
+            )
         for role_id in self._party_team_role_ids(guild.id):
             role = guild.get_role(int(role_id))
             if not role:
@@ -619,6 +650,63 @@ class ParliamentService:
             )
         return overwrites
 
+    async def _ensure_party_role(self, guild: discord.Guild, party_row) -> discord.Role | None:
+        party = self._party_data(party_row)
+        role_id = int(party["party_role_id"] or 0)
+        existing = guild.get_role(role_id) if role_id else None
+        desired_name = f"🏛️ {party['name']}"[:100]
+        if existing:
+            if str(existing.name) != desired_name:
+                try:
+                    await existing.edit(name=desired_name, reason=f"Partei #{party['id']} umbenannt")
+                except Exception:
+                    pass
+            return existing
+        try:
+            created = await guild.create_role(
+                name=desired_name,
+                mentionable=False,
+                hoist=False,
+                reason=f"Partei-Rolle #{party['id']}",
+            )
+        except Exception:
+            return None
+        await self.db.set_parliament_party_channels(
+            int(party["id"]),
+            category_id=int(party["category_id"] or 0) or None,
+            text_channel_id=int(party["text_channel_id"] or 0) or None,
+            settings_channel_id=int(party["settings_channel_id"] or 0) or None,
+            voice_channel_id=int(party["voice_channel_id"] or 0) or None,
+            party_role_id=int(created.id),
+            settings_message_id=int(party["settings_message_id"] or 0) or None,
+        )
+        return created
+
+    async def _sync_party_role_members(self, guild: discord.Guild, party_row):
+        party = self._party_data(party_row)
+        role_id = int(party["party_role_id"] or 0)
+        role = guild.get_role(role_id) if role_id else None
+        if not role:
+            role = await self._ensure_party_role(guild, party_row)
+        if not role:
+            return
+        rows = await self.db.list_parliament_party_members(int(party["id"]))
+        member_ids = {int(r[2]) for r in rows}
+        for member in list(getattr(role, "members", []) or []):
+            if int(member.id) not in member_ids:
+                try:
+                    await member.remove_roles(role, reason=f"Partei #{party['id']} verlassen")
+                except Exception:
+                    continue
+        for uid in member_ids:
+            member = guild.get_member(int(uid))
+            if not member or role in getattr(member, "roles", []):
+                continue
+            try:
+                await member.add_roles(role, reason=f"Partei #{party['id']} Mitglied")
+            except Exception:
+                continue
+
     def _party_data(self, row) -> dict:
         if not row:
             return {}
@@ -638,8 +726,9 @@ class ParliamentService:
             "text_channel_id": int(row[12] or 0),
             "settings_channel_id": int(row[13] or 0),
             "voice_channel_id": int(row[14] or 0),
-            "settings_message_id": int(row[15] or 0),
-            "thread_info_message_id": int(row[16] or 0),
+            "party_role_id": int(row[15] or 0),
+            "settings_message_id": int(row[16] or 0),
+            "thread_info_message_id": int(row[17] or 0),
         }
 
     async def _resolve_party_for_panel_interaction(self, interaction: discord.Interaction):
@@ -653,37 +742,56 @@ class ParliamentService:
         member_row = await self.db.get_parliament_party_member(int(party_row[0]), int(interaction.user.id))
         return bool(member_row and str(member_row[3]) == "leader")
 
-    async def _build_party_info_embed(self, guild: discord.Guild, party_row):
+    async def _build_party_info_view(self, guild: discord.Guild, party_row):
         party = self._party_data(party_row)
         members = await self.db.list_parliament_party_members(int(party["id"]))
         leader_row = next((m for m in members if str(m[3]) == "leader"), None)
         leader_id = int(leader_row[2]) if leader_row else int(party["founder_id"])
-        embed = discord.Embed(
-            title=f"🏛️ Partei: {party['name']}",
-            description=str(party["description"] or "Keine Beschreibung."),
-            color=0xB16B91,
-        )
-        embed.add_field(name="Status", value=str(party["status"]).upper(), inline=True)
-        embed.add_field(name="Chef", value=f"<@{leader_id}>", inline=True)
-        embed.add_field(name="Mitglieder", value=str(len(members)), inline=True)
-        manifesto_text = str(party["manifesto_text"] or "").strip()
-        if manifesto_text:
-            embed.add_field(name="Programm", value=manifesto_text[:1000], inline=False)
-        attach_text = "—"
+        arrow2 = em(self.settings, "arrow2", guild) or "»"
+        crown = em(self.settings, "crown", guild) or "👑"
+        people = em(self.settings, "people", guild) or "👥"
+        page = em(self.settings, "book", guild) or "📘"
+        attachments_icon = em(self.settings, "paperclip", guild) or "📎"
         raw = str(party["manifesto_attachments_json"] or "").strip()
+        links = []
         if raw:
             try:
-                links = json.loads(raw)
+                links = [str(x) for x in json.loads(raw) if str(x).strip()]
             except Exception:
                 links = []
-            links = [str(x) for x in links if str(x).strip()]
-            if links:
-                attach_text = "\n".join(links[:8])[:1000]
-        embed.add_field(name="Anhänge", value=attach_text, inline=False)
-        logo_url = str(party["logo_url"] or "").strip()
-        if logo_url:
-            embed.set_thumbnail(url=logo_url)
-        return embed
+        manifesto_text = str(party["manifesto_text"] or "").strip() or "Noch kein Programm hinterlegt."
+        attach_text = "\n".join(links[:8]) if links else "Keine Anhänge."
+        view = discord.ui.LayoutView(timeout=None)
+        container = discord.ui.Container(accent_colour=self._color(guild.id))
+        try:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=Banners.PARLIAMENT)
+            logo_url = str(party["logo_url"] or "").strip()
+            if logo_url and self._is_http_url(logo_url):
+                gallery.add_item(media=logo_url)
+            container.add_item(gallery)
+            container.add_item(discord.ui.Separator())
+        except Exception:
+            pass
+        status_label = str(party["status"] or "unbekannt").upper()
+        container.add_item(
+            discord.ui.TextDisplay(
+                f"**🏛️ 𑁉 PARTEI – {party['name'].upper()}**\n"
+                f"{arrow2} Öffentliche Informationen zur Partei.\n\n"
+                f"┏`🆔` - ID: **#{party['id']}**\n"
+                f"┣`🏷️` - Status: **{status_label}**\n"
+                f"┣`{crown}` - Chef: <@{leader_id}>\n"
+                f"┗`{people}` - Mitglieder: **{len(members)}**"
+            )
+        )
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(f"**📝 Beschreibung**\n{str(party['description'] or 'Keine Beschreibung.')[:1200]}"))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(f"**{page} Parteiprogramm**\n{manifesto_text[:1200]}"))
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(f"**{attachments_icon} Anhänge**\n{attach_text[:1200]}"))
+        view.add_item(container)
+        return view
 
     async def _sync_party_info_message(self, guild: discord.Guild, party_row):
         party = self._party_data(party_row)
@@ -693,7 +801,8 @@ class ParliamentService:
         thread = await self._get_party_thread(guild, thread_id)
         if not thread:
             return
-        embed = await self._build_party_info_embed(guild, party_row)
+        view = await self._build_party_info_view(guild, party_row)
+        marker = f"starry:party:info:{int(party['id'])}"
         message_id = int(party["thread_info_message_id"])
         msg = None
         if message_id:
@@ -701,35 +810,58 @@ class ParliamentService:
                 msg = await thread.fetch_message(message_id)
             except Exception:
                 msg = None
+        if not msg:
+            try:
+                async for old in thread.history(limit=80):
+                    if int(getattr(old.author, "id", 0)) != int(self.bot.user.id):
+                        continue
+                    if str(getattr(old, "content", "")) == marker:
+                        msg = old
+                        await self.db.set_parliament_party_thread_info_message(int(party["id"]), int(old.id))
+                        break
+            except Exception:
+                pass
         if msg:
             try:
-                await msg.edit(embed=embed)
+                await msg.edit(content=marker, embeds=[], view=view)
                 return
             except Exception:
-                # Invalid thumbnail URLs can break embed edits; remove logo and retry once.
                 try:
                     await self.db.set_parliament_party_logo(int(party["id"]), None)
                     refreshed = await self.db.get_parliament_party(int(party["id"]))
                     if refreshed:
-                        fallback_embed = await self._build_party_info_embed(guild, refreshed)
-                        await msg.edit(embed=fallback_embed)
+                        fallback_view = await self._build_party_info_view(guild, refreshed)
+                        await msg.edit(content=marker, embeds=[], view=fallback_view)
                         return
                 except Exception:
                     return
         try:
-            sent = await thread.send(embed=embed)
+            sent = await thread.send(content=marker, view=view)
         except Exception:
             try:
                 await self.db.set_parliament_party_logo(int(party["id"]), None)
                 refreshed = await self.db.get_parliament_party(int(party["id"]))
                 if refreshed:
-                    fallback_embed = await self._build_party_info_embed(guild, refreshed)
-                    sent = await thread.send(embed=fallback_embed)
+                    fallback_view = await self._build_party_info_view(guild, refreshed)
+                    sent = await thread.send(content=marker, view=fallback_view)
                 else:
                     return
             except Exception:
                 return
         await self.db.set_parliament_party_thread_info_message(int(party["id"]), int(sent.id))
+        try:
+            async for old in thread.history(limit=80):
+                if int(getattr(old.author, "id", 0)) != int(self.bot.user.id):
+                    continue
+                if int(old.id) == int(sent.id):
+                    continue
+                if str(getattr(old, "content", "")) == marker:
+                    await old.delete()
+                    continue
+                if old.embeds and str(getattr(old.embeds[0], "title", "")).startswith("🏛️ Partei:"):
+                    await old.delete()
+        except Exception:
+            pass
 
     async def create_party_panel(self, interaction: discord.Interaction):
         if not interaction.guild or not is_staff(self.settings, interaction.user):
@@ -851,14 +983,18 @@ class ParliamentService:
         leader_row = next((m for m in members if str(m[3]) == "leader"), None)
         leader_id = int(leader_row[2]) if leader_row else int(party["founder_id"])
         category_name = f"{self._party_category_prefix(interaction.guild.id)} • {party['name']}"[:95]
-        overwrites = self._party_overwrites(interaction.guild, member_ids)
+        party_role = await self._ensure_party_role(interaction.guild, party_row)
+        refreshed_before_channels = await self.db.get_parliament_party(int(party["id"]))
+        if refreshed_before_channels:
+            party = self._party_data(refreshed_before_channels)
+        overwrites = self._party_overwrites(interaction.guild, member_ids, party_role=party_role)
         category = await interaction.guild.create_category(name=category_name, overwrites=overwrites, reason=f"Partei genehmigt #{party_id}")
-        panel_overwrites = self._party_panel_overwrites(interaction.guild, leader_id=leader_id, member_ids=member_ids)
-        panel_channel = await interaction.guild.create_text_channel(name="panel", category=category, overwrites=panel_overwrites, reason=f"Partei #{party_id}")
-        text_channel = await interaction.guild.create_text_channel(name="text", category=category, reason=f"Partei #{party_id}")
-        voice_channel = await interaction.guild.create_voice_channel(name="voice", category=category, reason=f"Partei #{party_id}")
+        panel_overwrites = self._party_panel_overwrites(interaction.guild, leader_id=leader_id, member_ids=member_ids, party_role=party_role)
+        panel_channel = await interaction.guild.create_text_channel(name="🛠️・panel", category=category, overwrites=panel_overwrites, reason=f"Partei #{party_id}")
+        text_channel = await interaction.guild.create_text_channel(name="💬・chat", category=category, reason=f"Partei #{party_id}")
+        voice_channel = await interaction.guild.create_voice_channel(name="🔊・talk", category=category, reason=f"Partei #{party_id}")
 
-        settings_msg = await panel_channel.send(view=PartySettingsPanelView())
+        settings_msg = await panel_channel.send(view=PartySettingsPanelView(self.settings, interaction.guild))
         await text_channel.send(
             f"Willkommen im Parteikanal von **{party['name']}**.\n"
             f"Organisation und Verwaltung läuft in {panel_channel.mention}."
@@ -870,9 +1006,13 @@ class ParliamentService:
             text_channel_id=int(text_channel.id),
             settings_channel_id=int(panel_channel.id),
             voice_channel_id=int(voice_channel.id),
+            party_role_id=int(party_role.id) if party_role else None,
             settings_message_id=int(settings_msg.id),
         )
         await self.db.set_parliament_party_status_approved(int(party["id"]), int(interaction.user.id))
+        refreshed_after = await self.db.get_parliament_party(int(party["id"]))
+        if refreshed_after:
+            await self._sync_party_role_members(interaction.guild, refreshed_after)
 
         forum = await self._get_forum_channel(interaction.guild)
         if forum:
@@ -926,6 +1066,7 @@ class ParliamentService:
         category_id = int(party["category_id"] or 0)
         if not category_id:
             return
+        party_role = guild.get_role(int(party["party_role_id"] or 0)) if party.get("party_role_id") else None
         category = guild.get_channel(category_id)
         if not isinstance(category, discord.CategoryChannel):
             try:
@@ -937,7 +1078,7 @@ class ParliamentService:
             return
         members = await self.db.list_parliament_party_members(int(party["id"]))
         member_ids = [int(r[2]) for r in members]
-        overwrites = self._party_overwrites(guild, member_ids)
+        overwrites = self._party_overwrites(guild, member_ids, party_role=party_role)
         try:
             await category.edit(overwrites=overwrites)
         except Exception:
@@ -949,9 +1090,17 @@ class ParliamentService:
                 leader_row = next((m for m in members if str(m[3]) == "leader"), None)
                 leader_id = int(leader_row[2]) if leader_row else int(party["founder_id"])
                 try:
-                    await panel_channel.edit(overwrites=self._party_panel_overwrites(guild, leader_id, member_ids))
+                    await panel_channel.edit(overwrites=self._party_panel_overwrites(guild, leader_id, member_ids, party_role=party_role))
                 except Exception:
                     pass
+                panel_message_id = int(party["settings_message_id"] or 0)
+                if panel_message_id:
+                    try:
+                        msg = await panel_channel.fetch_message(panel_message_id)
+                        await msg.edit(view=PartySettingsPanelView(self.settings, guild))
+                    except Exception:
+                        pass
+        await self._sync_party_role_members(guild, party_row)
 
     async def update_party_logo(self, interaction: discord.Interaction, logo_url: str):
         party = await self._resolve_party_for_panel_interaction(interaction)
@@ -1004,6 +1153,8 @@ class ParliamentService:
         await self.db.set_parliament_party_basic_info(int(party["id"]), new_name, new_slug, new_desc[:500] if new_desc else None)
         refreshed = await self.db.get_parliament_party(int(party["id"]))
         if refreshed and interaction.guild:
+            await self._ensure_party_role(interaction.guild, refreshed)
+            await self._refresh_party_channels(interaction.guild, refreshed)
             await self._sync_party_info_message(interaction.guild, refreshed)
         await interaction.response.send_message("Parteidaten aktualisiert.", ephemeral=True)
 
@@ -1048,6 +1199,27 @@ class ParliamentService:
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
         await self._sync_party_info_message(interaction.guild, party_row)
         await interaction.response.send_message("Öffentlicher Partei-Thread wurde aktualisiert.", ephemeral=True)
+
+    async def refresh_party_presentations(self, guild: discord.Guild):
+        rows = await self.db.list_parliament_parties(guild.id, status="approved", limit=300)
+        for row in rows:
+            try:
+                await self._ensure_party_role(guild, row)
+                await self._refresh_party_channels(guild, row)
+                await self._sync_party_info_message(guild, row)
+                party = self._party_data(row)
+                panel_channel_id = int(party["settings_channel_id"] or 0)
+                panel_message_id = int(party["settings_message_id"] or 0)
+                if panel_channel_id and panel_message_id:
+                    panel_channel = guild.get_channel(panel_channel_id)
+                    if isinstance(panel_channel, discord.TextChannel):
+                        try:
+                            msg = await panel_channel.fetch_message(panel_message_id)
+                            await msg.edit(view=PartySettingsPanelView(self.settings, guild))
+                        except Exception:
+                            pass
+            except Exception:
+                continue
 
     async def submit_party_program(self, interaction: discord.Interaction, program_text: str):
         party = await self._resolve_party_for_panel_interaction(interaction)
@@ -1185,5 +1357,9 @@ class ParliamentService:
         for guild in list(self.bot.guilds):
             try:
                 await self.update_panel(guild)
+            except Exception:
+                continue
+            try:
+                await self.refresh_party_presentations(guild)
             except Exception:
                 continue

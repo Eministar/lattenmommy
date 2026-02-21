@@ -710,6 +710,7 @@ class Database:
             text_channel_id INTEGER,
             settings_channel_id INTEGER,
             voice_channel_id INTEGER,
+            party_role_id INTEGER,
             settings_message_id INTEGER,
             thread_info_message_id INTEGER,
             created_at TEXT NOT NULL,
@@ -853,6 +854,7 @@ class Database:
     async def _ensure_parliament_party_columns(self):
         await self._ensure_column("parliament_parties", "manifesto_attachments_json", "TEXT")
         await self._ensure_column("parliament_parties", "thread_info_message_id", "INTEGER")
+        await self._ensure_column("parliament_parties", "party_role_id", "INTEGER")
         await self._conn.commit()
 
     async def _ensure_birthdays_global_seed(self):
@@ -2455,7 +2457,7 @@ class Database:
         cur = await self._conn.execute(
             """
             SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
-                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id, party_role_id,
                    settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
             FROM parliament_parties
             WHERE id = ?
@@ -2469,7 +2471,7 @@ class Database:
         cur = await self._conn.execute(
             """
             SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
-                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id, party_role_id,
                    settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
             FROM parliament_parties
             WHERE guild_id = ? AND slug = ?
@@ -2484,7 +2486,7 @@ class Database:
             cur = await self._conn.execute(
                 """
                 SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
-                       forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                       forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id, party_role_id,
                        settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
                 FROM parliament_parties
                 WHERE guild_id = ? AND status = ?
@@ -2497,7 +2499,7 @@ class Database:
             cur = await self._conn.execute(
                 """
                 SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
-                       forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                       forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id, party_role_id,
                        settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
                 FROM parliament_parties
                 WHERE guild_id = ?
@@ -2512,7 +2514,7 @@ class Database:
         cur = await self._conn.execute(
             """
             SELECT p.id, p.guild_id, p.name, p.slug, p.founder_id, p.status, p.description, p.logo_url, p.manifesto_text, p.manifesto_attachments_json,
-                   p.forum_thread_id, p.category_id, p.text_channel_id, p.settings_channel_id, p.voice_channel_id,
+                   p.forum_thread_id, p.category_id, p.text_channel_id, p.settings_channel_id, p.voice_channel_id, p.party_role_id,
                    p.settings_message_id, p.thread_info_message_id, p.created_at, p.approved_by, p.approved_at, p.rejected_by, p.rejected_at, p.rejection_reason
             FROM parliament_parties p
             JOIN parliament_party_members m ON m.party_id = p.id
@@ -2529,7 +2531,7 @@ class Database:
         cur = await self._conn.execute(
             """
             SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
-                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
+                   forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id, party_role_id,
                    settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
             FROM parliament_parties
             WHERE guild_id = ? AND settings_channel_id = ?
@@ -2639,12 +2641,13 @@ class Database:
         text_channel_id: int | None = None,
         settings_channel_id: int | None = None,
         voice_channel_id: int | None = None,
+        party_role_id: int | None = None,
         settings_message_id: int | None = None,
     ):
         await self._conn.execute(
             """
             UPDATE parliament_parties
-            SET category_id = ?, text_channel_id = ?, settings_channel_id = ?, voice_channel_id = ?, settings_message_id = ?
+            SET category_id = ?, text_channel_id = ?, settings_channel_id = ?, voice_channel_id = ?, party_role_id = ?, settings_message_id = ?
             WHERE id = ?;
             """,
             (
@@ -2652,6 +2655,7 @@ class Database:
                 int(text_channel_id) if text_channel_id else None,
                 int(settings_channel_id) if settings_channel_id else None,
                 int(voice_channel_id) if voice_channel_id else None,
+                int(party_role_id) if party_role_id else None,
                 int(settings_message_id) if settings_message_id else None,
                 int(party_id),
             ),
