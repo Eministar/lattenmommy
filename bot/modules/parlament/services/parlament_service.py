@@ -521,6 +521,11 @@ class ParliamentService:
         except Exception:
             return 0xB16B91
 
+    async def _send_ephemeral(self, interaction: discord.Interaction, content: str):
+        if interaction.response.is_done():
+            return await interaction.followup.send(content, ephemeral=True)
+        return await interaction.response.send_message(content, ephemeral=True)
+
     def _extract_user_ids(self, text: str) -> list[int]:
         found = set()
         for raw in re.findall(r"\d{5,22}", str(text or "")):
@@ -962,22 +967,27 @@ class ParliamentService:
 
     async def approve_party(self, interaction: discord.Interaction, party_id: int):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "Nur im Server nutzbar.")
         if not is_staff(self.settings, interaction.user):
-            return await interaction.response.send_message("Keine Rechte.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "Keine Rechte.")
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True, thinking=True)
+            except Exception:
+                pass
 
         party_row = await self.db.get_parliament_party(int(party_id))
         if not party_row:
-            return await interaction.response.send_message("Partei nicht gefunden.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "Partei nicht gefunden.")
         party = self._party_data(party_row)
         if int(party["guild_id"]) != int(interaction.guild.id):
-            return await interaction.response.send_message("Partei nicht gefunden.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "Partei nicht gefunden.")
         if str(party["status"]) != "pending":
-            return await interaction.response.send_message("Partei ist nicht mehr im Status 'pending'.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "Partei ist nicht mehr im Status 'pending'.")
 
         members = await self.db.list_parliament_party_members(int(party["id"]))
         if len(members) < 3:
-            return await interaction.response.send_message("Genehmigung nicht möglich: mindestens 3 Mitglieder erforderlich.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "Genehmigung nicht möglich: mindestens 3 Mitglieder erforderlich.")
 
         member_ids = [int(r[2]) for r in members]
         leader_row = next((m for m in members if str(m[3]) == "leader"), None)
@@ -1025,7 +1035,7 @@ class ParliamentService:
             refreshed = await self.db.get_parliament_party(int(party["id"]))
             if refreshed:
                 await self._sync_party_info_message(interaction.guild, refreshed)
-        await interaction.response.send_message(f"Partei **#{party_id} {party['name']}** wurde genehmigt.", ephemeral=True)
+        await self._send_ephemeral(interaction, f"Partei **#{party_id} {party['name']}** wurde genehmigt.")
 
     async def reject_party(self, interaction: discord.Interaction, party_id: int, reason: str | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):

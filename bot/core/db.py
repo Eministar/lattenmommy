@@ -855,7 +855,40 @@ class Database:
         await self._ensure_column("parliament_parties", "manifesto_attachments_json", "TEXT")
         await self._ensure_column("parliament_parties", "thread_info_message_id", "INTEGER")
         await self._ensure_column("parliament_parties", "party_role_id", "INTEGER")
+        await self._ensure_parliament_party_bigint_columns()
         await self._conn.commit()
+
+    async def _ensure_parliament_party_bigint_columns(self):
+        if self._driver != "mysql":
+            return
+        for column in (
+            "thread_info_message_id",
+            "party_role_id",
+            "forum_thread_id",
+            "category_id",
+            "text_channel_id",
+            "settings_channel_id",
+            "voice_channel_id",
+            "settings_message_id",
+        ):
+            try:
+                cur = await self._conn.execute(
+                    """
+                    SELECT DATA_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'parliament_parties' AND COLUMN_NAME = %s
+                    LIMIT 1;
+                    """,
+                    (self._mysql_db, str(column)),
+                )
+                row = await cur.fetchone()
+                dtype = str(row[0]).lower() if row and row[0] else ""
+                if dtype and dtype != "bigint":
+                    await self._conn.execute(
+                        f"ALTER TABLE parliament_parties MODIFY COLUMN {column} BIGINT;"
+                    )
+            except Exception:
+                continue
 
     async def _ensure_birthdays_global_seed(self):
         try:
