@@ -82,6 +82,7 @@ from bot.modules.invites.services.invite_service import InviteService
 from bot.modules.invites.cogs.invite_listener import InviteListener
 from bot.modules.parlament.services.parlament_service import ParliamentService
 from bot.modules.parlament.cogs.parlament_commands import ParliamentCommands
+from bot.modules.parlament.cogs.party_listener import PartyPanelListener
 from bot.modules.parlament.views.party_views import PartyCreatePanelView, PartySettingsPanelView
 from bot.modules.bot_status.services.bot_status_service import BotStatusService
 
@@ -210,6 +211,7 @@ class StarryBot(commands.Bot):
         await self.add_cog(BeichteCommands(self))
         await self.add_cog(InviteListener(self))
         await self.add_cog(ParliamentCommands(self))
+        await self.add_cog(PartyPanelListener(self))
         await self.add_cog(ModerationCommands(self))
         await self.add_cog(ModLogListener(self))
         await self.add_cog(ChannelRoleLogListener(self))

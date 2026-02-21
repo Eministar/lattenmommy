@@ -704,12 +704,14 @@ class Database:
             description TEXT,
             logo_url TEXT,
             manifesto_text TEXT,
+            manifesto_attachments_json TEXT,
             forum_thread_id INTEGER,
             category_id INTEGER,
             text_channel_id INTEGER,
             settings_channel_id INTEGER,
             voice_channel_id INTEGER,
             settings_message_id INTEGER,
+            thread_info_message_id INTEGER,
             created_at TEXT NOT NULL,
             approved_by INTEGER,
             approved_at TEXT,
@@ -718,6 +720,7 @@ class Database:
             rejection_reason TEXT
         );
         """)
+        await self._ensure_parliament_party_columns()
         if self._driver == "mysql":
             await self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_parliament_parties_status ON parliament_parties(guild_id, status(32))")
@@ -845,6 +848,11 @@ class Database:
         await self._ensure_column("polls", "image_url", "TEXT")
         await self._ensure_column("polls", "end_at", "TEXT")
         await self._ensure_column("polls", "closed_at", "TEXT")
+        await self._conn.commit()
+
+    async def _ensure_parliament_party_columns(self):
+        await self._ensure_column("parliament_parties", "manifesto_attachments_json", "TEXT")
+        await self._ensure_column("parliament_parties", "thread_info_message_id", "INTEGER")
         await self._conn.commit()
 
     async def _ensure_birthdays_global_seed(self):
@@ -2446,9 +2454,9 @@ class Database:
     async def get_parliament_party(self, party_id: int):
         cur = await self._conn.execute(
             """
-            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
                    forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
-                   settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                   settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
             FROM parliament_parties
             WHERE id = ?
             LIMIT 1;
@@ -2460,9 +2468,9 @@ class Database:
     async def get_parliament_party_by_slug(self, guild_id: int, slug: str):
         cur = await self._conn.execute(
             """
-            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
                    forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
-                   settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                   settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
             FROM parliament_parties
             WHERE guild_id = ? AND slug = ?
             LIMIT 1;
@@ -2475,9 +2483,9 @@ class Database:
         if status:
             cur = await self._conn.execute(
                 """
-                SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
                        forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
-                       settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                       settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
                 FROM parliament_parties
                 WHERE guild_id = ? AND status = ?
                 ORDER BY id DESC
@@ -2488,9 +2496,9 @@ class Database:
         else:
             cur = await self._conn.execute(
                 """
-                SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+                SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
                        forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
-                       settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                       settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
                 FROM parliament_parties
                 WHERE guild_id = ?
                 ORDER BY id DESC
@@ -2503,9 +2511,9 @@ class Database:
     async def get_parliament_party_for_user(self, guild_id: int, user_id: int):
         cur = await self._conn.execute(
             """
-            SELECT p.id, p.guild_id, p.name, p.slug, p.founder_id, p.status, p.description, p.logo_url, p.manifesto_text,
+            SELECT p.id, p.guild_id, p.name, p.slug, p.founder_id, p.status, p.description, p.logo_url, p.manifesto_text, p.manifesto_attachments_json,
                    p.forum_thread_id, p.category_id, p.text_channel_id, p.settings_channel_id, p.voice_channel_id,
-                   p.settings_message_id, p.created_at, p.approved_by, p.approved_at, p.rejected_by, p.rejected_at, p.rejection_reason
+                   p.settings_message_id, p.thread_info_message_id, p.created_at, p.approved_by, p.approved_at, p.rejected_by, p.rejected_at, p.rejection_reason
             FROM parliament_parties p
             JOIN parliament_party_members m ON m.party_id = p.id
             WHERE p.guild_id = ? AND m.guild_id = ? AND m.user_id = ?
@@ -2520,9 +2528,9 @@ class Database:
     async def get_parliament_party_by_settings_channel(self, guild_id: int, settings_channel_id: int):
         cur = await self._conn.execute(
             """
-            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text,
+            SELECT id, guild_id, name, slug, founder_id, status, description, logo_url, manifesto_text, manifesto_attachments_json,
                    forum_thread_id, category_id, text_channel_id, settings_channel_id, voice_channel_id,
-                   settings_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
+                   settings_message_id, thread_info_message_id, created_at, approved_by, approved_at, rejected_by, rejected_at, rejection_reason
             FROM parliament_parties
             WHERE guild_id = ? AND settings_channel_id = ?
             LIMIT 1;
@@ -2566,14 +2574,45 @@ class Database:
         )
         await self._conn.commit()
 
-    async def set_parliament_party_manifesto(self, party_id: int, manifesto_text: str | None):
+    async def set_parliament_party_manifesto(
+        self,
+        party_id: int,
+        manifesto_text: str | None,
+        attachments_json: str | None = None,
+    ):
         await self._conn.execute(
             """
             UPDATE parliament_parties
-            SET manifesto_text = ?
+            SET manifesto_text = ?, manifesto_attachments_json = ?
             WHERE id = ?;
             """,
-            (str(manifesto_text or "").strip() or None, int(party_id)),
+            (
+                str(manifesto_text or "").strip() or None,
+                str(attachments_json or "").strip() or None,
+                int(party_id),
+            ),
+        )
+        await self._conn.commit()
+
+    async def set_parliament_party_forum_thread(self, party_id: int, forum_thread_id: int | None):
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET forum_thread_id = ?
+            WHERE id = ?;
+            """,
+            (int(forum_thread_id) if forum_thread_id else None, int(party_id)),
+        )
+        await self._conn.commit()
+
+    async def set_parliament_party_thread_info_message(self, party_id: int, message_id: int | None):
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET thread_info_message_id = ?
+            WHERE id = ?;
+            """,
+            (int(message_id) if message_id else None, int(party_id)),
         )
         await self._conn.commit()
 

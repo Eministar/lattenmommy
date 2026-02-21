@@ -202,9 +202,10 @@ class PartySettingsPanelView(discord.ui.LayoutView):
                 "**⚙️ 𑁉 PARTEI-EINSTELLUNGEN**\n"
                 "Dieses Panel gehört in euren Partei-Panel-Channel.\n\n"
                 "┏`🖼️` - Logo hinterlegen\n"
-                "┣`📜` - Parteiprogramm in den Parteithread senden\n"
+                "┣`📜` - Programm direkt posten (Text/PDF im Panel-Channel)\n"
                 "┣`➕` - Mitglieder hinzufügen\n"
-                "┗`➖` - Mitglieder entfernen"
+                "┗`➖` - Mitglieder entfernen\n\n"
+                "Nur der Parteichef darf hier schreiben."
             )
         )
         container.add_item(discord.ui.Separator())

@@ -48,6 +48,9 @@ class ParliamentService:
     def _party_forum_channel_id(self, guild_id: int) -> int:
         return self._gi(guild_id, "parlament.parties.forum_channel_id", 0)
 
+    def _party_request_channel_id(self, guild_id: int) -> int:
+        return self._gi(guild_id, "parlament.parties.request_channel_id", self._party_panel_channel_id(guild_id))
+
     def _party_team_role_ids(self, guild_id: int) -> list[int]:
         raw = self._g(guild_id, "parlament.parties.team_role_ids", []) or []
         out = []
@@ -505,6 +508,18 @@ class ParliamentService:
                 ch = None
         return ch if isinstance(ch, discord.ForumChannel) else None
 
+    async def _get_request_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
+        channel_id = self._party_request_channel_id(guild.id)
+        if not channel_id:
+            return None
+        ch = guild.get_channel(channel_id)
+        if not ch:
+            try:
+                ch = await guild.fetch_channel(channel_id)
+            except Exception:
+                ch = None
+        return ch if isinstance(ch, discord.TextChannel) else None
+
     async def _get_party_thread(self, guild: discord.Guild, thread_id: int) -> discord.Thread | None:
         if not thread_id:
             return None
@@ -549,18 +564,130 @@ class ParliamentService:
             )
         return overwrites
 
+    def _party_panel_overwrites(
+        self,
+        guild: discord.Guild,
+        leader_id: int,
+        member_ids: list[int],
+    ) -> dict[discord.abc.Snowflake, discord.PermissionOverwrite]:
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False)
+        }
+        for role_id in self._party_team_role_ids(guild.id):
+            role = guild.get_role(int(role_id))
+            if not role:
+                continue
+            overwrites[role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=False,
+                read_message_history=True,
+                manage_messages=True,
+                manage_channels=True,
+            )
+        for user_id in member_ids:
+            member = guild.get_member(int(user_id))
+            if not member:
+                continue
+            can_send = int(user_id) == int(leader_id)
+            overwrites[member] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=can_send,
+                attach_files=can_send,
+                embed_links=can_send,
+                read_message_history=True,
+            )
+        return overwrites
+
+    def _party_data(self, row) -> dict:
+        if not row:
+            return {}
+        return {
+            "id": int(row[0]),
+            "guild_id": int(row[1]),
+            "name": str(row[2] or ""),
+            "slug": str(row[3] or ""),
+            "founder_id": int(row[4] or 0),
+            "status": str(row[5] or ""),
+            "description": str(row[6] or ""),
+            "logo_url": str(row[7] or "") if row[7] else "",
+            "manifesto_text": str(row[8] or "") if row[8] else "",
+            "manifesto_attachments_json": str(row[9] or "") if row[9] else "",
+            "forum_thread_id": int(row[10] or 0),
+            "category_id": int(row[11] or 0),
+            "text_channel_id": int(row[12] or 0),
+            "settings_channel_id": int(row[13] or 0),
+            "voice_channel_id": int(row[14] or 0),
+            "settings_message_id": int(row[15] or 0),
+            "thread_info_message_id": int(row[16] or 0),
+        }
+
     async def _resolve_party_for_panel_interaction(self, interaction: discord.Interaction):
         if not interaction.guild or not interaction.channel:
             return None
         return await self.db.get_parliament_party_by_settings_channel(interaction.guild.id, int(interaction.channel.id))
 
-    async def _is_party_leader_or_staff(self, interaction: discord.Interaction, party_row) -> bool:
+    async def _is_party_leader(self, interaction: discord.Interaction, party_row) -> bool:
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return False
-        if is_staff(self.settings, interaction.user):
-            return True
         member_row = await self.db.get_parliament_party_member(int(party_row[0]), int(interaction.user.id))
         return bool(member_row and str(member_row[3]) == "leader")
+
+    async def _build_party_info_embed(self, guild: discord.Guild, party_row):
+        party = self._party_data(party_row)
+        members = await self.db.list_parliament_party_members(int(party["id"]))
+        leader_row = next((m for m in members if str(m[3]) == "leader"), None)
+        leader_id = int(leader_row[2]) if leader_row else int(party["founder_id"])
+        embed = discord.Embed(
+            title=f"🏛️ Partei: {party['name']}",
+            description=str(party["description"] or "Keine Beschreibung."),
+            color=0xB16B91,
+        )
+        embed.add_field(name="Status", value=str(party["status"]).upper(), inline=True)
+        embed.add_field(name="Chef", value=f"<@{leader_id}>", inline=True)
+        embed.add_field(name="Mitglieder", value=str(len(members)), inline=True)
+        manifesto_text = str(party["manifesto_text"] or "").strip()
+        if manifesto_text:
+            embed.add_field(name="Programm", value=manifesto_text[:1000], inline=False)
+        attach_text = "—"
+        raw = str(party["manifesto_attachments_json"] or "").strip()
+        if raw:
+            try:
+                links = json.loads(raw)
+            except Exception:
+                links = []
+            links = [str(x) for x in links if str(x).strip()]
+            if links:
+                attach_text = "\n".join(links[:8])[:1000]
+        embed.add_field(name="Anhänge", value=attach_text, inline=False)
+        logo_url = str(party["logo_url"] or "").strip()
+        if logo_url:
+            embed.set_thumbnail(url=logo_url)
+        return embed
+
+    async def _sync_party_info_message(self, guild: discord.Guild, party_row):
+        party = self._party_data(party_row)
+        thread_id = int(party["forum_thread_id"])
+        if not thread_id:
+            return
+        thread = await self._get_party_thread(guild, thread_id)
+        if not thread:
+            return
+        embed = await self._build_party_info_embed(guild, party_row)
+        message_id = int(party["thread_info_message_id"])
+        msg = None
+        if message_id:
+            try:
+                msg = await thread.fetch_message(message_id)
+            except Exception:
+                msg = None
+        if msg:
+            try:
+                await msg.edit(embed=embed)
+            except Exception:
+                pass
+            return
+        sent = await thread.send(embed=embed)
+        await self.db.set_parliament_party_thread_info_message(int(party["id"]), int(sent.id))
 
     async def create_party_panel(self, interaction: discord.Interaction):
         if not interaction.guild or not is_staff(self.settings, interaction.user):
@@ -612,19 +739,9 @@ class ParliamentService:
                 ephemeral=True,
             )
 
-        forum = await self._get_forum_channel(interaction.guild)
-        if not forum:
-            return await interaction.response.send_message("Partei-Forum ist nicht konfiguriert.", ephemeral=True)
-
-        intro = (
-            f"**Partei-Antrag**\n"
-            f"Name: **{party_name}**\n"
-            f"Gründer: {interaction.user.mention}\n"
-            f"Mitglieder (vorläufig): **{len(member_ids)}**\n\n"
-            f"**Kurzbeschreibung**\n{str(description or '').strip()[:500]}"
-        )
-        created = await forum.create_thread(name=f"🗳️ {party_name}"[:100], content=intro)
-        thread = created.thread
+        request_channel = await self._get_request_channel(interaction.guild)
+        if not request_channel:
+            return await interaction.response.send_message("Partei-Request-Channel ist nicht konfiguriert.", ephemeral=True)
 
         party_id = await self.db.create_parliament_party(
             interaction.guild.id,
@@ -632,7 +749,7 @@ class ParliamentService:
             slug,
             interaction.user.id,
             description=description,
-            forum_thread_id=int(thread.id),
+            forum_thread_id=None,
         )
 
         await self.db.add_parliament_party_member(party_id, interaction.guild.id, interaction.user.id, "leader", added_by=interaction.user.id)
@@ -647,8 +764,22 @@ class ParliamentService:
             if role:
                 mentions.append(role.mention)
         mention_text = " ".join(mentions).strip()
-        if mention_text:
-            await thread.send(f"{mention_text}\nNeuer Partei-Antrag: **#{party_id} {party_name}**")
+        leader_mentions = []
+        for uid in member_ids:
+            member = interaction.guild.get_member(int(uid))
+            if member:
+                leader_mentions.append(member.mention)
+        embed = discord.Embed(
+            title=f"Neue Partei-Anfrage #{party_id}",
+            description=str(description or "").strip()[:1000],
+            color=0xB16B91,
+        )
+        embed.add_field(name="Partei", value=party_name, inline=True)
+        embed.add_field(name="Gründer", value=interaction.user.mention, inline=True)
+        embed.add_field(name="Mitglieder", value=str(len(member_ids)), inline=True)
+        embed.add_field(name="Mitgliedsliste", value=", ".join(leader_mentions)[:1000] or "—", inline=False)
+        head = f"{mention_text}\n" if mention_text else ""
+        await request_channel.send(f"{head}Neue Partei-Anfrage eingegangen.", embed=embed)
 
         await interaction.response.send_message(
             f"Partei-Antrag erstellt: **#{party_id} {party_name}**. Das Team prüft jetzt eure Gründung.",
@@ -661,63 +792,58 @@ class ParliamentService:
         if not is_staff(self.settings, interaction.user):
             return await interaction.response.send_message("Keine Rechte.", ephemeral=True)
 
-        party = await self.db.get_parliament_party(int(party_id))
-        if not party or int(party[1]) != int(interaction.guild.id):
+        party_row = await self.db.get_parliament_party(int(party_id))
+        if not party_row:
             return await interaction.response.send_message("Partei nicht gefunden.", ephemeral=True)
-        if str(party[5]) != "pending":
+        party = self._party_data(party_row)
+        if int(party["guild_id"]) != int(interaction.guild.id):
+            return await interaction.response.send_message("Partei nicht gefunden.", ephemeral=True)
+        if str(party["status"]) != "pending":
             return await interaction.response.send_message("Partei ist nicht mehr im Status 'pending'.", ephemeral=True)
 
-        members = await self.db.list_parliament_party_members(int(party[0]))
+        members = await self.db.list_parliament_party_members(int(party["id"]))
         if len(members) < 3:
             return await interaction.response.send_message("Genehmigung nicht möglich: mindestens 3 Mitglieder erforderlich.", ephemeral=True)
 
         member_ids = [int(r[2]) for r in members]
-        category_name = f"{self._party_category_prefix(interaction.guild.id)} • {party[2]}"[:95]
+        leader_row = next((m for m in members if str(m[3]) == "leader"), None)
+        leader_id = int(leader_row[2]) if leader_row else int(party["founder_id"])
+        category_name = f"{self._party_category_prefix(interaction.guild.id)} • {party['name']}"[:95]
         overwrites = self._party_overwrites(interaction.guild, member_ids)
         category = await interaction.guild.create_category(name=category_name, overwrites=overwrites, reason=f"Partei genehmigt #{party_id}")
-        panel_channel = await interaction.guild.create_text_channel(name="panel", category=category, reason=f"Partei #{party_id}")
+        panel_overwrites = self._party_panel_overwrites(interaction.guild, leader_id=leader_id, member_ids=member_ids)
+        panel_channel = await interaction.guild.create_text_channel(name="panel", category=category, overwrites=panel_overwrites, reason=f"Partei #{party_id}")
         text_channel = await interaction.guild.create_text_channel(name="text", category=category, reason=f"Partei #{party_id}")
         voice_channel = await interaction.guild.create_voice_channel(name="voice", category=category, reason=f"Partei #{party_id}")
 
         settings_msg = await panel_channel.send(view=PartySettingsPanelView())
         await text_channel.send(
-            f"Willkommen im Parteikanal von **{party[2]}**.\n"
+            f"Willkommen im Parteikanal von **{party['name']}**.\n"
             f"Organisation und Verwaltung läuft in {panel_channel.mention}."
         )
 
         await self.db.set_parliament_party_channels(
-            int(party[0]),
+            int(party["id"]),
             category_id=int(category.id),
             text_channel_id=int(text_channel.id),
             settings_channel_id=int(panel_channel.id),
             voice_channel_id=int(voice_channel.id),
             settings_message_id=int(settings_msg.id),
         )
-        await self.db.set_parliament_party_status_approved(int(party[0]), int(interaction.user.id))
+        await self.db.set_parliament_party_status_approved(int(party["id"]), int(interaction.user.id))
 
-        thread_id = int(party[9] or 0)
-        thread = await self._get_party_thread(interaction.guild, thread_id) if thread_id else None
-        if thread:
-            try:
-                await thread.edit(archived=False, locked=False)
-            except Exception:
-                pass
-            for member_id in member_ids:
-                m = interaction.guild.get_member(int(member_id))
-                if m:
-                    try:
-                        await thread.add_user(m)
-                    except Exception:
-                        continue
-            await thread.send(
-                f"✅ Partei genehmigt durch {interaction.user.mention}.\n"
-                f"Kategorie: {category.mention}\n"
-                f"Panel: {panel_channel.mention}\n"
-                f"Text: {text_channel.mention}\n"
-                f"Voice: {voice_channel.mention}"
+        forum = await self._get_forum_channel(interaction.guild)
+        if forum:
+            thread_result = await forum.create_thread(
+                name=f"🏛️ {party['name']}"[:100],
+                content=f"Öffentlicher Parteithread: **{party['name']}**",
             )
-
-        await interaction.response.send_message(f"Partei **#{party_id} {party[2]}** wurde genehmigt.", ephemeral=True)
+            thread = thread_result.thread
+            await self.db.set_parliament_party_forum_thread(int(party["id"]), int(thread.id))
+            refreshed = await self.db.get_parliament_party(int(party["id"]))
+            if refreshed:
+                await self._sync_party_info_message(interaction.guild, refreshed)
+        await interaction.response.send_message(f"Partei **#{party_id} {party['name']}** wurde genehmigt.", ephemeral=True)
 
     async def reject_party(self, interaction: discord.Interaction, party_id: int, reason: str | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -725,22 +851,17 @@ class ParliamentService:
         if not is_staff(self.settings, interaction.user):
             return await interaction.response.send_message("Keine Rechte.", ephemeral=True)
 
-        party = await self.db.get_parliament_party(int(party_id))
-        if not party or int(party[1]) != int(interaction.guild.id):
+        party_row = await self.db.get_parliament_party(int(party_id))
+        if not party_row:
             return await interaction.response.send_message("Partei nicht gefunden.", ephemeral=True)
-        if str(party[5]) != "pending":
+        party = self._party_data(party_row)
+        if int(party["guild_id"]) != int(interaction.guild.id):
+            return await interaction.response.send_message("Partei nicht gefunden.", ephemeral=True)
+        if str(party["status"]) != "pending":
             return await interaction.response.send_message("Partei ist nicht mehr im Status 'pending'.", ephemeral=True)
 
-        await self.db.set_parliament_party_status_rejected(int(party[0]), int(interaction.user.id), reason=reason)
-        thread_id = int(party[9] or 0)
-        thread = await self._get_party_thread(interaction.guild, thread_id) if thread_id else None
-        if thread:
-            msg = f"❌ Partei-Antrag wurde abgelehnt durch {interaction.user.mention}."
-            if reason:
-                msg = f"{msg}\nGrund: {reason}"
-            await thread.send(msg)
-
-        await interaction.response.send_message(f"Partei **#{party_id} {party[2]}** wurde abgelehnt.", ephemeral=True)
+        await self.db.set_parliament_party_status_rejected(int(party["id"]), int(interaction.user.id), reason=reason)
+        await interaction.response.send_message(f"Partei **#{party_id} {party['name']}** wurde abgelehnt.", ephemeral=True)
 
     async def list_parties(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -759,7 +880,8 @@ class ParliamentService:
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     async def _refresh_party_channels(self, guild: discord.Guild, party_row):
-        category_id = int(party_row[10] or 0)
+        party = self._party_data(party_row)
+        category_id = int(party["category_id"] or 0)
         if not category_id:
             return
         category = guild.get_channel(category_id)
@@ -771,38 +893,52 @@ class ParliamentService:
             category = fetched if isinstance(fetched, discord.CategoryChannel) else None
         if not category:
             return
-        members = await self.db.list_parliament_party_members(int(party_row[0]))
+        members = await self.db.list_parliament_party_members(int(party["id"]))
         member_ids = [int(r[2]) for r in members]
         overwrites = self._party_overwrites(guild, member_ids)
         try:
             await category.edit(overwrites=overwrites)
         except Exception:
             pass
+        panel_channel_id = int(party["settings_channel_id"] or 0)
+        if panel_channel_id:
+            panel_channel = guild.get_channel(panel_channel_id)
+            if isinstance(panel_channel, discord.TextChannel):
+                leader_row = next((m for m in members if str(m[3]) == "leader"), None)
+                leader_id = int(leader_row[2]) if leader_row else int(party["founder_id"])
+                try:
+                    await panel_channel.edit(overwrites=self._party_panel_overwrites(guild, leader_id, member_ids))
+                except Exception:
+                    pass
 
     async def update_party_logo(self, interaction: discord.Interaction, logo_url: str):
         party = await self._resolve_party_for_panel_interaction(interaction)
         if not party:
             return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
-        if not await self._is_party_leader_or_staff(interaction, party):
-            return await interaction.response.send_message("Nur Parteileitung oder Team.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
         value = str(logo_url or "").strip()
         if value and not (value.startswith("http://") or value.startswith("https://")):
             return await interaction.response.send_message("Bitte eine gültige URL angeben (http/https).", ephemeral=True)
         await self.db.set_parliament_party_logo(int(party[0]), value or None)
+        refreshed = await self.db.get_parliament_party(int(party[0]))
+        if refreshed and interaction.guild:
+            await self._sync_party_info_message(interaction.guild, refreshed)
         await interaction.response.send_message("Logo gespeichert.", ephemeral=True)
 
     async def submit_party_program(self, interaction: discord.Interaction, program_text: str):
         party = await self._resolve_party_for_panel_interaction(interaction)
         if not party:
             return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
-        if not await self._is_party_leader_or_staff(interaction, party):
-            return await interaction.response.send_message("Nur Parteileitung oder Team.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
         text = str(program_text or "").strip()
         if len(text) < 20:
             return await interaction.response.send_message("Programm ist zu kurz.", ephemeral=True)
 
-        await self.db.set_parliament_party_manifesto(int(party[0]), text[:4000])
-        thread_id = int(party[9] or 0)
+        existing_attachments_json = str(party[9] or "").strip() or None
+        await self.db.set_parliament_party_manifesto(int(party[0]), text[:4000], attachments_json=existing_attachments_json)
+        thread_id = int(party[10] or 0)
         if not interaction.guild or not thread_id:
             return await interaction.response.send_message("Parteithread ist nicht konfiguriert.", ephemeral=True)
         thread = await self._get_party_thread(interaction.guild, thread_id)
@@ -820,14 +956,51 @@ class ParliamentService:
         await thread.send(
             f"📜 **Parteiprogramm von {interaction.user.mention}**\n\n{text[:3900]}"
         )
+        refreshed = await self.db.get_parliament_party(int(party[0]))
+        if refreshed:
+            await self._sync_party_info_message(interaction.guild, refreshed)
         await interaction.response.send_message(f"Programm im Thread {thread.mention} eingereicht.", ephemeral=True)
+
+    async def submit_party_program_from_message(self, message: discord.Message):
+        if not message.guild or not isinstance(message.author, discord.Member):
+            return
+        party_row = await self.db.get_parliament_party_by_settings_channel(message.guild.id, int(message.channel.id))
+        if not party_row:
+            return
+        member_row = await self.db.get_parliament_party_member(int(party_row[0]), int(message.author.id))
+        if not member_row or str(member_row[3]) != "leader":
+            return
+        text = str(message.content or "").strip()
+        attachment_urls = []
+        for a in list(getattr(message, "attachments", []) or []):
+            url = str(getattr(a, "url", "") or "").strip()
+            if url:
+                attachment_urls.append(url)
+        if not text and not attachment_urls:
+            return
+        attachments_json = json.dumps(attachment_urls, ensure_ascii=False) if attachment_urls else None
+        await self.db.set_parliament_party_manifesto(int(party_row[0]), text[:4000] if text else None, attachments_json=attachments_json)
+        party = self._party_data(party_row)
+        thread_id = int(party["forum_thread_id"] or 0)
+        thread = await self._get_party_thread(message.guild, thread_id) if thread_id else None
+        if thread:
+            lines = [f"📜 **Programm-Update von {message.author.mention}**"]
+            if text:
+                lines.append(text[:3800])
+            if attachment_urls:
+                lines.append("**Anhänge**")
+                lines.extend(attachment_urls[:8])
+            await thread.send("\n\n".join(lines))
+        refreshed = await self.db.get_parliament_party(int(party_row[0]))
+        if refreshed:
+            await self._sync_party_info_message(message.guild, refreshed)
 
     async def add_party_member_from_panel(self, interaction: discord.Interaction, user_id_raw: str):
         party = await self._resolve_party_for_panel_interaction(interaction)
         if not party:
             return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
-        if not await self._is_party_leader_or_staff(interaction, party):
-            return await interaction.response.send_message("Nur Parteileitung oder Team.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
         try:
@@ -849,8 +1022,8 @@ class ParliamentService:
         party = await self._resolve_party_for_panel_interaction(interaction)
         if not party:
             return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
-        if not await self._is_party_leader_or_staff(interaction, party):
-            return await interaction.response.send_message("Nur Parteileitung oder Team.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
         if not interaction.guild:
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
         try:
