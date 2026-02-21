@@ -2574,6 +2574,22 @@ class Database:
         )
         await self._conn.commit()
 
+    async def set_parliament_party_basic_info(self, party_id: int, name: str, slug: str, description: str | None):
+        await self._conn.execute(
+            """
+            UPDATE parliament_parties
+            SET name = ?, slug = ?, description = ?
+            WHERE id = ?;
+            """,
+            (
+                str(name).strip(),
+                str(slug).strip(),
+                str(description or "").strip() or None,
+                int(party_id),
+            ),
+        )
+        await self._conn.commit()
+
     async def set_parliament_party_manifesto(
         self,
         party_id: int,

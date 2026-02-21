@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 import discord
 
@@ -487,6 +488,26 @@ class ParliamentService:
         cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
         return cleaned[:48] or "partei"
 
+    def _is_http_url(self, value: str) -> bool:
+        raw = str(value or "").strip()
+        if not raw:
+            return False
+        try:
+            parsed = urlparse(raw)
+            return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+        except Exception:
+            return False
+
+    def _extract_first_image_attachment_url(self, message: discord.Message) -> str | None:
+        for att in list(getattr(message, "attachments", []) or []):
+            url = str(getattr(att, "url", "") or "").strip()
+            content_type = str(getattr(att, "content_type", "") or "").lower()
+            fn = str(getattr(att, "filename", "") or "").lower()
+            if "image/" in content_type or fn.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+                if self._is_http_url(url):
+                    return url
+        return None
+
     def _extract_user_ids(self, text: str) -> list[int]:
         found = set()
         for raw in re.findall(r"\d{5,22}", str(text or "")):
@@ -683,10 +704,31 @@ class ParliamentService:
         if msg:
             try:
                 await msg.edit(embed=embed)
+                return
             except Exception:
-                pass
-            return
-        sent = await thread.send(embed=embed)
+                # Invalid thumbnail URLs can break embed edits; remove logo and retry once.
+                try:
+                    await self.db.set_parliament_party_logo(int(party["id"]), None)
+                    refreshed = await self.db.get_parliament_party(int(party["id"]))
+                    if refreshed:
+                        fallback_embed = await self._build_party_info_embed(guild, refreshed)
+                        await msg.edit(embed=fallback_embed)
+                        return
+                except Exception:
+                    return
+        try:
+            sent = await thread.send(embed=embed)
+        except Exception:
+            try:
+                await self.db.set_parliament_party_logo(int(party["id"]), None)
+                refreshed = await self.db.get_parliament_party(int(party["id"]))
+                if refreshed:
+                    fallback_embed = await self._build_party_info_embed(guild, refreshed)
+                    sent = await thread.send(embed=fallback_embed)
+                else:
+                    return
+            except Exception:
+                return
         await self.db.set_parliament_party_thread_info_message(int(party["id"]), int(sent.id))
 
     async def create_party_panel(self, interaction: discord.Interaction):
@@ -918,13 +960,94 @@ class ParliamentService:
         if not await self._is_party_leader(interaction, party):
             return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
         value = str(logo_url or "").strip()
-        if value and not (value.startswith("http://") or value.startswith("https://")):
-            return await interaction.response.send_message("Bitte eine gültige URL angeben (http/https).", ephemeral=True)
-        await self.db.set_parliament_party_logo(int(party[0]), value or None)
+        if value and not self._is_http_url(value):
+            return await interaction.response.send_message("Ungültige URL. Nutze http/https oder lade ein Bild im Panel-Channel mit `logo` hoch.", ephemeral=True)
+        try:
+            await self.db.set_parliament_party_logo(int(party[0]), value or None)
+            refreshed = await self.db.get_parliament_party(int(party[0]))
+            if refreshed and interaction.guild:
+                await self._sync_party_info_message(interaction.guild, refreshed)
+            await interaction.response.send_message("Logo gespeichert.", ephemeral=True)
+        except Exception:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Logo konnte nicht gespeichert werden.", ephemeral=True)
+            else:
+                await interaction.followup.send("Logo konnte nicht gespeichert werden.", ephemeral=True)
+
+    async def clear_party_logo(self, interaction: discord.Interaction):
+        party = await self._resolve_party_for_panel_interaction(interaction)
+        if not party:
+            return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
+        await self.db.set_parliament_party_logo(int(party[0]), None)
         refreshed = await self.db.get_parliament_party(int(party[0]))
         if refreshed and interaction.guild:
             await self._sync_party_info_message(interaction.guild, refreshed)
-        await interaction.response.send_message("Logo gespeichert.", ephemeral=True)
+        await interaction.response.send_message("Logo entfernt.", ephemeral=True)
+
+    async def update_party_basic_info(self, interaction: discord.Interaction, name: str, description: str):
+        party_row = await self._resolve_party_for_panel_interaction(interaction)
+        if not party_row:
+            return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party_row):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
+        party = self._party_data(party_row)
+        new_name = str(name or "").strip()
+        new_desc = str(description or "").strip()
+        if len(new_name) < 3 or len(new_name) > 50:
+            return await interaction.response.send_message("Parteiname muss 3-50 Zeichen lang sein.", ephemeral=True)
+        new_slug = self._party_slug(new_name)
+        dupe = await self.db.get_parliament_party_by_slug(interaction.guild.id, new_slug) if interaction.guild else None
+        if dupe and int(dupe[0]) != int(party["id"]) and str(dupe[5]) in {"pending", "approved"}:
+            return await interaction.response.send_message("Der Name ist bereits vergeben.", ephemeral=True)
+        await self.db.set_parliament_party_basic_info(int(party["id"]), new_name, new_slug, new_desc[:500] if new_desc else None)
+        refreshed = await self.db.get_parliament_party(int(party["id"]))
+        if refreshed and interaction.guild:
+            await self._sync_party_info_message(interaction.guild, refreshed)
+        await interaction.response.send_message("Parteidaten aktualisiert.", ephemeral=True)
+
+    async def transfer_party_leadership(self, interaction: discord.Interaction, user_id_raw: str):
+        party_row = await self._resolve_party_for_panel_interaction(interaction)
+        if not party_row:
+            return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party_row):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
+        if not interaction.guild:
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        try:
+            new_leader_id = int(str(user_id_raw).strip())
+        except Exception:
+            return await interaction.response.send_message("Ungültige User-ID.", ephemeral=True)
+        target_member = interaction.guild.get_member(new_leader_id)
+        if not target_member:
+            return await interaction.response.send_message("Mitglied nicht gefunden.", ephemeral=True)
+        member_row = await self.db.get_parliament_party_member(int(party_row[0]), new_leader_id)
+        if not member_row:
+            return await interaction.response.send_message("User muss zuerst Mitglied der Partei sein.", ephemeral=True)
+        current = await self.db.list_parliament_party_members(int(party_row[0]))
+        current_leader = next((m for m in current if str(m[3]) == "leader"), None)
+        if current_leader and int(current_leader[2]) == int(new_leader_id):
+            return await interaction.response.send_message("User ist bereits Parteichef.", ephemeral=True)
+        if current_leader:
+            await self.db.add_parliament_party_member(int(party_row[0]), interaction.guild.id, int(current_leader[2]), "member", added_by=int(interaction.user.id))
+        await self.db.add_parliament_party_member(int(party_row[0]), interaction.guild.id, int(new_leader_id), "leader", added_by=int(interaction.user.id))
+        refreshed = await self.db.get_parliament_party(int(party_row[0]))
+        if refreshed:
+            await self._refresh_party_channels(interaction.guild, refreshed)
+            await self._sync_party_info_message(interaction.guild, refreshed)
+        await interaction.response.send_message(f"Parteichef ist jetzt {target_member.mention}.", ephemeral=True)
+
+    async def sync_party_public_info(self, interaction: discord.Interaction):
+        party_row = await self._resolve_party_for_panel_interaction(interaction)
+        if not party_row:
+            return await interaction.response.send_message("Dieser Kanal ist keinem Partei-Panel zugeordnet.", ephemeral=True)
+        if not await self._is_party_leader(interaction, party_row):
+            return await interaction.response.send_message("Nur der Parteichef darf das.", ephemeral=True)
+        if not interaction.guild:
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        await self._sync_party_info_message(interaction.guild, party_row)
+        await interaction.response.send_message("Öffentlicher Partei-Thread wurde aktualisiert.", ephemeral=True)
 
     async def submit_party_program(self, interaction: discord.Interaction, program_text: str):
         party = await self._resolve_party_for_panel_interaction(interaction)
@@ -971,6 +1094,24 @@ class ParliamentService:
         if not member_row or str(member_row[3]) != "leader":
             return
         text = str(message.content or "").strip()
+        lower = text.lower()
+        if lower in {"logo", "setlogo", "logo setzen"} or lower.startswith("logo "):
+            image_url = self._extract_first_image_attachment_url(message)
+            if not image_url:
+                try:
+                    await message.reply("Bitte hänge ein Bild an, um das Logo zu setzen.", mention_author=False)
+                except Exception:
+                    pass
+                return
+            await self.db.set_parliament_party_logo(int(party_row[0]), image_url)
+            refreshed = await self.db.get_parliament_party(int(party_row[0]))
+            if refreshed:
+                await self._sync_party_info_message(message.guild, refreshed)
+            try:
+                await message.reply("Logo wurde gesetzt.", mention_author=False)
+            except Exception:
+                pass
+            return
         attachment_urls = []
         for a in list(getattr(message, "attachments", []) or []):
             url = str(getattr(a, "url", "") or "").strip()
