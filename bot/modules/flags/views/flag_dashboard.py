@@ -25,7 +25,7 @@ class FlagBetModal(discord.ui.Modal, title="Custom-Flaggenrunde"):
         wager = int(raw)
         ok, msg = await service.start_bet_round(interaction.guild, interaction.channel, interaction.user, wager)
         if ok:
-            return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
+            return await interaction.response.defer()
         return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
 
 
@@ -106,6 +106,7 @@ class FlagReplayButton(discord.ui.Button):
         labels = {
             "normal": ("Rätsel", "🎯", discord.ButtonStyle.success),
             "easy": ("Easy", "✨", discord.ButtonStyle.primary),
+            "bet": ("Custom", "💰", discord.ButtonStyle.danger),
         }
         label, emoji, style = labels.get(action, ("Rätsel", "🎯", discord.ButtonStyle.secondary))
         super().__init__(label=label, emoji=emoji, style=style, custom_id=f"starry:flag_replay:{action}")
@@ -117,6 +118,8 @@ class FlagReplayButton(discord.ui.Button):
         if not service:
             return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
         action = str(self.custom_id).split(":")[-1]
+        if action == "bet":
+            return await interaction.response.send_modal(FlagBetModal())
         ok, msg = await service.start_round(interaction.guild, interaction.channel, interaction.user, action)
         if ok:
             await interaction.response.defer()
@@ -129,3 +132,4 @@ class FlagReplayView(discord.ui.View):
         super().__init__(timeout=timeout)
         self.add_item(FlagReplayButton("normal"))
         self.add_item(FlagReplayButton("easy"))
+        self.add_item(FlagReplayButton("bet"))
