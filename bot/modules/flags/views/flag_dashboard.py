@@ -5,12 +5,37 @@ import discord
 from bot.modules.flags.formatting.flag_embeds import build_leaderboard_embed, build_streaks_embed
 
 
+class FlagBetModal(discord.ui.Modal, title="Custom-Flaggenrunde"):
+    wager = discord.ui.TextInput(
+        label="Einsatz (Punkte)",
+        placeholder="z.B. 25",
+        required=True,
+        max_length=8,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel) or not interaction.user:
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
+        service = getattr(interaction.client, "flag_quiz_service", None)
+        if not service:
+            return await interaction.response.send_message("Flag-Service nicht verfuegbar.", ephemeral=True, delete_after=30)
+        raw = str(self.wager.value or "").strip()
+        if not raw.isdigit():
+            return await interaction.response.send_message("Bitte gib eine ganze Zahl als Einsatz ein.", ephemeral=True, delete_after=30)
+        wager = int(raw)
+        ok, msg = await service.start_bet_round(interaction.guild, interaction.channel, interaction.user, wager)
+        if ok:
+            return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
+        return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
+
+
 class FlagDashboardButton(discord.ui.Button):
     def __init__(self, action: str):
         labels = {
             "normal": ("Rätsel", "🎯", discord.ButtonStyle.success),
             "easy": ("Easy", "✨", discord.ButtonStyle.primary),
             "daily": ("Daily", "📆", discord.ButtonStyle.primary),
+            "bet": ("Custom", "💰", discord.ButtonStyle.danger),
             "leaderboard": ("Leaderboard", "🏆", discord.ButtonStyle.secondary),
             "streaks": ("Streaks", "🔥", discord.ButtonStyle.secondary),
         }
@@ -30,6 +55,8 @@ class FlagDashboardButton(discord.ui.Button):
                 await interaction.response.defer()
                 return
             return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
+        if action == "bet":
+            return await interaction.response.send_modal(FlagBetModal())
         if action == "leaderboard":
             rows = await interaction.client.db.list_flag_players_top_points(interaction.guild.id, limit=10)
             emb = build_leaderboard_embed(interaction.client.settings, interaction.guild, rows)
@@ -69,6 +96,7 @@ class FlagDashboardPersistentView(discord.ui.View):
         self.add_item(FlagDashboardButton("normal"))
         self.add_item(FlagDashboardButton("easy"))
         self.add_item(FlagDashboardButton("daily"))
+        self.add_item(FlagDashboardButton("bet"))
         self.add_item(FlagDashboardButton("leaderboard"))
         self.add_item(FlagDashboardButton("streaks"))
 

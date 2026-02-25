@@ -31,11 +31,13 @@ class ActiveRound:
     prompt_message_id: int
     task: asyncio.Task | None
     end_at: datetime
+    wager_points: int = 0
 
 
 class FlagQuizService:
     TIME_LIMIT_SECONDS = 30
-    POINTS_NORMAL = 10
+    TIME_LIMIT_BET_SECONDS = 15
+    POINTS_NORMAL = 15
     POINTS_EASY = 3
     POINTS_DAILY = 25
     STREAK_ACHIEVEMENTS = [5, 10, 25, 50]
@@ -372,6 +374,7 @@ class FlagQuizService:
             FlagDashboardButton("normal"),
             FlagDashboardButton("easy"),
             FlagDashboardButton("daily"),
+            FlagDashboardButton("bet"),
             FlagDashboardButton("leaderboard"),
             FlagDashboardButton("streaks"),
         ]
@@ -383,7 +386,14 @@ class FlagQuizService:
         await self.db.set_flag_quiz_channel(guild.id, int(channel.id))
         await self.ensure_dashboard(guild, channel)
 
-    async def start_round(self, guild: discord.Guild, channel: discord.TextChannel, user: discord.Member, mode: str) -> tuple[bool, str]:
+    async def start_round(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        user: discord.Member,
+        mode: str,
+        wager_points: int = 0,
+    ) -> tuple[bool, str]:
         if not self._enabled(guild.id):
             return False, "Flaggenquiz ist deaktiviert."
         await self._ensure_country_data()
@@ -396,6 +406,15 @@ class FlagQuizService:
             return False, "Für dich läuft bereits eine Runde."
 
         mode_key = str(mode).lower()
+        wager = int(wager_points or 0)
+        if mode_key == "bet":
+            if wager < 1:
+                return False, "Der Einsatz muss mindestens 1 Punkt sein."
+            ps = await self._get_player_stats(guild.id, user.id)
+            if int(ps["total_points"]) < wager:
+                return False, f"Du hast nicht genug Punkte. Verfügbar: {int(ps['total_points'])}."
+            ps["total_points"] -= wager
+            await self._save_player_stats(guild.id, user.id, ps)
         if mode_key == "daily":
             ps = await self._get_player_stats(guild.id, user.id)
             today = datetime.now(timezone.utc).date().isoformat()
@@ -424,7 +443,8 @@ class FlagQuizService:
         fs["asked"] += 1
         await self._save_flag_stats(guild.id, code, fs)
         flag_url = self._flag_url_for(code)
-        end_at = datetime.now(timezone.utc) + timedelta(seconds=self.TIME_LIMIT_SECONDS)
+        time_limit_seconds = self.TIME_LIMIT_BET_SECONDS if mode_key == "bet" else self.TIME_LIMIT_SECONDS
+        end_at = datetime.now(timezone.utc) + timedelta(seconds=time_limit_seconds)
 
         emb = build_round_embed(
             self.settings,
@@ -435,6 +455,8 @@ class FlagQuizService:
             flag_url,
             mode_key,
             end_at=end_at,
+            wager_points=wager,
+            time_limit_seconds=time_limit_seconds,
             asked=int(fs["asked"]),
             correct=int(fs["correct"]),
             wrong=int(fs["wrong"]),
@@ -446,7 +468,7 @@ class FlagQuizService:
         msg = await channel.send(embed=emb, view=view, delete_after=30)
 
         async def _timeout():
-            await asyncio.sleep(self.TIME_LIMIT_SECONDS)
+            await asyncio.sleep(time_limit_seconds)
             current = self._rounds.get(key)
             if not current:
                 return
@@ -467,7 +489,7 @@ class FlagQuizService:
                     name,
                     code,
                     flag_url,
-                    0,
+                    -wager if mode_key == "bet" else 0,
                     int(ps["total_points"]),
                     int(ps["current_streak"]),
                     asked=int(fstats["asked"]),
@@ -492,8 +514,20 @@ class FlagQuizService:
             int(msg.id),
             task,
             end_at,
+            wager,
         )
-        return True
+        if mode_key == "bet":
+            return True, f"Custom-Runde gestartet mit **{wager}** Einsatz (15s)."
+        return True, "Runde gestartet."
+
+    async def start_bet_round(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        user: discord.Member,
+        wager_points: int,
+    ) -> tuple[bool, str]:
+        return await self.start_round(guild, channel, user, "bet", wager_points=wager_points)
 
     async def handle_text_answer(self, message: discord.Message):
         if not message.guild or not isinstance(message.channel, discord.TextChannel):
@@ -555,7 +589,14 @@ class FlagQuizService:
         ps = await self._get_player_stats(guild.id, int(user.id))
         name = self._name_for(round_.code)
         if correct:
-            gain = self.POINTS_DAILY if round_.mode == "daily" else (self.POINTS_EASY if round_.mode == "easy" else self.POINTS_NORMAL)
+            if round_.mode == "daily":
+                gain = self.POINTS_DAILY
+            elif round_.mode == "easy":
+                gain = self.POINTS_EASY
+            elif round_.mode == "bet":
+                gain = int(round_.wager_points) * 2
+            else:
+                gain = self.POINTS_NORMAL
             ps["total_points"] += gain
             ps["correct"] += 1
             ps["current_streak"] += 1
@@ -602,7 +643,7 @@ class FlagQuizService:
                     name,
                     round_.code,
                     round_.flag_url,
-                    0,
+                    -int(round_.wager_points) if round_.mode == "bet" else 0,
                     int(ps["total_points"]),
                     int(ps["current_streak"]),
                     asked=int(fstats["asked"]),

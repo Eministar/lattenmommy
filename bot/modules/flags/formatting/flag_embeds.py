@@ -34,7 +34,8 @@ def build_dashboard_view(settings, guild: discord.Guild | None, stats: dict, but
     header = f"**{info} 𑁉 FLAGGENQUIZ**"
     desc = (
         f"{arrow2} Lerne Länder über echte Flaggenbilder im schnellen Quiz-Modus.\n"
-        f"{arrow2} Starte Normal, Easy oder Daily und sammle Punkte + Streaks.\n\n"
+        f"{arrow2} Starte Normal, Easy, Daily oder Custom und sammle Punkte + Streaks.\n"
+        f"{arrow2} Custom: Einsatz setzen, 15s Zeit, richtig = doppelt zurueck, falsch = Einsatz weg.\n\n"
         f"┏`👥` - Spieler: **{int(stats.get('players', 0))}**\n"
         f"┣`🎮` - Runden: **{int(stats.get('rounds', 0))}**\n"
         f"┣`🔥` - Beste Streak: **{int(stats.get('best_streak', 0))}**\n"
@@ -44,10 +45,11 @@ def build_dashboard_view(settings, guild: discord.Guild | None, stats: dict, but
     _add_banner(container)
     container.add_item(discord.ui.TextDisplay(f"{header}\n{desc}"))
     container.add_item(discord.ui.Separator())
-    row = discord.ui.ActionRow()
-    for btn in buttons:
-        row.add_item(btn)
-    container.add_item(row)
+    for i in range(0, len(buttons), 5):
+        row = discord.ui.ActionRow()
+        for btn in buttons[i:i + 5]:
+            row.add_item(btn)
+        container.add_item(row)
     view = discord.ui.LayoutView(timeout=None)
     view.add_item(container)
     return view
@@ -62,25 +64,31 @@ def build_round_embed(
     flag_url: str,
     mode: str,
     end_at: datetime | None = None,
+    wager_points: int = 0,
+    time_limit_seconds: int = 30,
     asked: int = 0,
     correct: int = 0,
     wrong: int = 0,
 ):
     arrow2 = em(settings, "arrow2", guild) or "»"
-    mode_text = {"normal": "Normal", "easy": "Easy", "daily": "Daily"}.get(str(mode), "Normal")
+    mode_text = {"normal": "Normal", "easy": "Easy", "daily": "Daily", "bet": "Custom"}.get(str(mode), "Normal")
     title = f"**🎯 𑁉 FLAGGENRÄTSEL ({mode_text})**"
-    timer_text = "**30s**"
+    timer_text = f"**{int(time_limit_seconds)}s**"
     if end_at is not None:
         try:
             timer_text = f"{format_dt(end_at, style='R')} ({format_dt(end_at, style='t')})"
         except Exception:
-            timer_text = "**30s**"
+            timer_text = f"**{int(time_limit_seconds)}s**"
 
+    wager_line = ""
+    if int(wager_points) > 0:
+        wager_line = f"┣`💰` - Einsatz: **{int(wager_points)}** (Gewinn bei richtig: **+{int(wager_points) * 2}**)\n"
     body = (
         f"{arrow2} Antworte mit dem Ländernamen.\n\n"
         f"┏`👤` - Für: <@{int(target_id)}>\n"
         f"┣`🌍` - Flagge: **Unbekannt**\n"
         f"┣`📈` - Diese Flagge: gefragt **{int(asked)}x**\n"
+        f"{wager_line}"
         f"┣`✅` - Richtig: **{int(correct)}**\n"
         f"┣`❌` - Falsch: **{int(wrong)}**\n"
         f"┗`⏱️` - Zeitlimit: {timer_text}"
@@ -115,10 +123,13 @@ def build_result_embed(
             f"┗`📊` - Flaggen-Stats: **{int(asked)}** gefragt • ✅ {int(right_total)} • ❌ {int(wrong_total)}"
         )
     else:
+        points_line = f"┣`💎` - Gesamtpunkte: **{int(total_points)}**\n"
+        if int(points_gained) < 0:
+            points_line = f"┣`💎` - Punkte: **{int(points_gained)}** (Gesamt: **{int(total_points)}**)\n"
         desc = (
             f"┏`👤` - User: <@{int(user_id)}>\n"
             f"┣`🌍` - Lösung: **{country_name}** ({code})\n"
-            f"┣`💎` - Gesamtpunkte: **{int(total_points)}**\n"
+            f"{points_line}"
             f"┣`🔥` - Aktuelle Streak: **{int(current_streak)}**\n"
             f"┗`📊` - Flaggen-Stats: **{int(asked)}** gefragt • ✅ {int(right_total)} • ❌ {int(wrong_total)}"
         )
