@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 import random
 import re
+import math
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -41,6 +42,7 @@ class FlagQuizService:
     POINTS_EASY = 3
     POINTS_DAILY = 25
     STREAK_ACHIEVEMENTS = [5, 10, 25, 50]
+    DEFAULT_BLACKLIST_CODES = {"AQ", "BV", "HM", "TF", "UM"}
 
     def __init__(self, bot: discord.Client, settings, db, logger):
         self.bot = bot
@@ -86,6 +88,9 @@ class FlagQuizService:
             "switzerland": "CH",
         }
         self._loaded_country_data = False
+        self._last_round_start_at: dict[tuple[int, int, int], datetime] = {}
+        self._recent_codes_by_guild: dict[int, list[str]] = {}
+        self._resolve_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
 
     def _enabled(self, guild_id: int) -> bool:
         try:
@@ -209,13 +214,77 @@ class FlagQuizService:
     def _quiz_key(self, guild_id: int, channel_id: int, user_id: int) -> tuple[int, int, int]:
         return int(guild_id), int(channel_id), int(user_id)
 
-    def _random_code(self) -> str:
-        return random.choice(self._codes)
+    def _points_for_mode(self, guild_id: int, mode: str) -> int:
+        mode_key = str(mode).lower()
+        if mode_key == "easy":
+            return max(1, int(self.settings.get_guild_int(guild_id, "flags.points.easy", self.POINTS_EASY)))
+        if mode_key == "daily":
+            return max(1, int(self.settings.get_guild_int(guild_id, "flags.points.daily", self.POINTS_DAILY)))
+        return max(1, int(self.settings.get_guild_int(guild_id, "flags.points.normal", self.POINTS_NORMAL)))
 
-    def _daily_code(self, guild_id: int) -> str:
+    def _max_gain_per_round(self, guild_id: int) -> int:
+        return max(1, int(self.settings.get_guild_int(guild_id, "flags.points.max_gain_per_round", 100)))
+
+    def _max_wager_points(self, guild_id: int) -> int:
+        return max(1, int(self.settings.get_guild_int(guild_id, "flags.bet.max_wager_points", 50)))
+
+    def _start_cooldown_seconds(self, guild_id: int) -> int:
+        return max(0, int(self.settings.get_guild_int(guild_id, "flags.round_cooldown_seconds", 5)))
+
+    def _repeat_memory_size(self, guild_id: int) -> int:
+        return max(0, int(self.settings.get_guild_int(guild_id, "flags.repeat_protection.last_n", 15)))
+
+    async def _blacklisted_codes(self, guild_id: int) -> set[str]:
+        await self._ensure_country_data()
+        raw = self.settings.get_guild(guild_id, "flags.blacklist", [])
+        blocked: set[str] = set(self.DEFAULT_BLACKLIST_CODES)
+        if not isinstance(raw, list):
+            return blocked
+        for item in raw:
+            probe = str(item or "").strip()
+            if not probe:
+                continue
+            up = probe.upper()
+            if len(up) == 2 and up in self._codes:
+                blocked.add(up)
+                continue
+            resolved = await self._resolve_code(probe)
+            if resolved:
+                blocked.add(str(resolved).upper())
+        return blocked
+
+    async def _available_codes(self, guild_id: int) -> list[str]:
+        blocked = await self._blacklisted_codes(guild_id)
+        out = [c for c in self._codes if c not in blocked]
+        return out if out else list(self._codes)
+
+    def _remember_recent_code(self, guild_id: int, code: str):
+        gid = int(guild_id)
+        size = self._repeat_memory_size(gid)
+        if size <= 0:
+            return
+        buf = self._recent_codes_by_guild.get(gid, [])
+        buf.append(str(code).upper())
+        if len(buf) > size:
+            buf = buf[-size:]
+        self._recent_codes_by_guild[gid] = buf
+
+    async def _random_code(self, guild_id: int) -> str:
+        pool = await self._available_codes(guild_id)
+        if len(pool) <= 1:
+            return pool[0]
+        recent = set(self._recent_codes_by_guild.get(int(guild_id), []))
+        filtered = [c for c in pool if c not in recent]
+        base = filtered if filtered else pool
+        return random.choice(base)
+
+    async def _daily_code(self, guild_id: int) -> str:
+        pool = await self._available_codes(guild_id)
+        if not pool:
+            pool = list(self._codes)
         today = datetime.now(timezone.utc).date().isoformat()
-        idx = abs(hash((int(guild_id), today))) % max(1, len(self._codes))
-        return self._codes[idx]
+        idx = abs(hash((int(guild_id), today))) % max(1, len(pool))
+        return pool[idx]
 
     async def _resolve_code(self, query: str) -> str | None:
         await self._ensure_country_data()
@@ -404,12 +473,23 @@ class FlagQuizService:
         key = self._quiz_key(guild.id, channel.id, user.id)
         if key in self._rounds:
             return False, "Für dich läuft bereits eine Runde."
+        cooldown_seconds = self._start_cooldown_seconds(guild.id)
+        if cooldown_seconds > 0:
+            last = self._last_round_start_at.get(key)
+            if last:
+                delta = (datetime.now(timezone.utc) - last).total_seconds()
+                if delta < cooldown_seconds:
+                    remaining = max(1, int(math.ceil(cooldown_seconds - delta)))
+                    return False, f"Bitte warte noch **{remaining}s** bis zur nächsten Runde."
 
         mode_key = str(mode).lower()
         wager = int(wager_points or 0)
         if mode_key == "bet":
             if wager < 1:
                 return False, "Der Einsatz muss mindestens 1 Punkt sein."
+            max_wager = self._max_wager_points(guild.id)
+            if wager > max_wager:
+                return False, f"Maximaler Einsatz ist **{max_wager}** Punkte."
             ps = await self._get_player_stats(guild.id, user.id)
             if int(ps["total_points"]) < wager:
                 return False, f"Du hast nicht genug Punkte. Verfügbar: {int(ps['total_points'])}."
@@ -420,9 +500,9 @@ class FlagQuizService:
             today = datetime.now(timezone.utc).date().isoformat()
             if ps.get("last_daily") == today:
                 return False, "Du hast die Daily heute schon gespielt."
-            code = self._daily_code(guild.id)
+            code = await self._daily_code(guild.id)
         else:
-            code = self._random_code()
+            code = await self._random_code(guild.id)
         name = self._name_for(code)
         answers = self._answer_candidates_for(code, name)
 
@@ -430,8 +510,9 @@ class FlagQuizService:
         button_view_map: dict[str, tuple[str, str]] = {}
         if mode_key == "easy":
             options = {code}
-            while len(options) < 4 and len(options) < len(self._codes):
-                options.add(self._random_code())
+            available_codes = await self._available_codes(guild.id)
+            while len(options) < 4 and len(options) < len(available_codes):
+                options.add(await self._random_code(guild.id))
             opts = list(options)
             random.shuffle(opts)
             for c in opts:
@@ -466,13 +547,30 @@ class FlagQuizService:
             from bot.modules.flags.views.flag_dashboard import FlagEasyAnswerView
             view = FlagEasyAnswerView(button_view_map)
         msg = await channel.send(embed=emb, view=view, delete_after=30)
+        self._last_round_start_at[key] = datetime.now(timezone.utc)
+        self._remember_recent_code(guild.id, code)
+
+        round_ = ActiveRound(
+            guild.id,
+            channel.id,
+            user.id,
+            mode_key,
+            code,
+            flag_url,
+            answers,
+            button_map,
+            int(msg.id),
+            None,
+            end_at,
+            wager,
+        )
+        self._rounds[key] = round_
 
         async def _timeout():
             await asyncio.sleep(time_limit_seconds)
-            current = self._rounds.get(key)
-            if not current:
+            claimed = await self._claim_round(key, round_)
+            if not claimed:
                 return
-            self._rounds.pop(key, None)
             ps = await self._get_player_stats(guild.id, user.id)
             ps["wrong"] += 1
             ps["current_streak"] = 0
@@ -502,20 +600,7 @@ class FlagQuizService:
             await self.refresh_dashboard(guild)
 
         task = asyncio.create_task(_timeout())
-        self._rounds[key] = ActiveRound(
-            guild.id,
-            channel.id,
-            user.id,
-            mode_key,
-            code,
-            flag_url,
-            answers,
-            button_map,
-            int(msg.id),
-            task,
-            end_at,
-            wager,
-        )
+        round_.task = task
         if mode_key == "bet":
             return True, f"Custom-Runde gestartet mit **{wager}** Einsatz (15s)."
         return True, "Runde gestartet."
@@ -579,7 +664,9 @@ class FlagQuizService:
 
     async def _resolve_round(self, guild: discord.Guild, channel: discord.TextChannel, user: discord.abc.User, round_: ActiveRound, correct: bool):
         key = self._quiz_key(guild.id, channel.id, int(user.id))
-        self._rounds.pop(key, None)
+        claimed = await self._claim_round(key, round_)
+        if not claimed:
+            return
         if round_.task:
             round_.task.cancel()
         try:
@@ -590,13 +677,15 @@ class FlagQuizService:
         name = self._name_for(round_.code)
         if correct:
             if round_.mode == "daily":
-                gain = self.POINTS_DAILY
+                gain = self._points_for_mode(guild.id, "daily")
             elif round_.mode == "easy":
-                gain = self.POINTS_EASY
+                gain = self._points_for_mode(guild.id, "easy")
             elif round_.mode == "bet":
-                gain = int(round_.wager_points) * 2
+                gain = min(int(round_.wager_points) * 2, self._max_gain_per_round(guild.id))
             else:
-                gain = self.POINTS_NORMAL
+                gain = self._points_for_mode(guild.id, "normal")
+            if round_.mode != "bet":
+                gain = min(int(gain), self._max_gain_per_round(guild.id))
             ps["total_points"] += gain
             ps["correct"] += 1
             ps["current_streak"] += 1
@@ -698,6 +787,18 @@ class FlagQuizService:
             name = member.display_name if member else str(uid)
             lines.append(f"#{i} {name} - {points} Punkte")
         return "\n".join(lines)
+
+    async def _claim_round(self, key: tuple[int, int, int], expected: ActiveRound) -> bool:
+        lock = self._resolve_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._resolve_locks[key] = lock
+        async with lock:
+            current = self._rounds.get(key)
+            if current is None or current is not expected:
+                return False
+            self._rounds.pop(key, None)
+            return True
 
     async def streaks_text(self, guild: discord.Guild, limit: int = 10) -> str:
         rows = await self.db.list_flag_players_top_streak(guild.id, limit=limit)
