@@ -36,7 +36,8 @@ class FlagDashboardButton(discord.ui.Button):
             "easy": ("Easy", "✨", discord.ButtonStyle.primary),
             "daily": ("Daily", "📆", discord.ButtonStyle.primary),
             "bet": ("Custom", "💰", discord.ButtonStyle.danger),
-            "leaderboard": ("Leaderboard", "🏆", discord.ButtonStyle.secondary),
+            "leaderboard_weekly": ("Woche", "🏆", discord.ButtonStyle.secondary),
+            "leaderboard_monthly": ("Monat", "🥇", discord.ButtonStyle.secondary),
             "streaks": ("Streaks", "🔥", discord.ButtonStyle.secondary),
         }
         label, emoji, style = labels.get(action, ("Aktion", "🧩", discord.ButtonStyle.secondary))
@@ -57,9 +58,17 @@ class FlagDashboardButton(discord.ui.Button):
             return await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
         if action == "bet":
             return await interaction.response.send_modal(FlagBetModal())
-        if action == "leaderboard":
-            rows = await interaction.client.db.list_flag_players_top_points(interaction.guild.id, limit=10)
-            emb = build_leaderboard_embed(interaction.client.settings, interaction.guild, rows)
+        if action == "leaderboard_weekly":
+            service = getattr(interaction.client, "flag_quiz_service", None)
+            week_key = service.current_period_keys()[0] if service else ""
+            rows = await interaction.client.db.list_flag_players_top_points_weekly(interaction.guild.id, week_key, limit=10)
+            emb = build_leaderboard_embed(interaction.client.settings, interaction.guild, rows, title="🏆 𑁉 WOCHEN-LEADERBOARD")
+            return await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
+        if action == "leaderboard_monthly":
+            service = getattr(interaction.client, "flag_quiz_service", None)
+            month_key = service.current_period_keys()[1] if service else ""
+            rows = await interaction.client.db.list_flag_players_top_points_monthly(interaction.guild.id, month_key, limit=10)
+            emb = build_leaderboard_embed(interaction.client.settings, interaction.guild, rows, title="🥇 𑁉 MONATS-LEADERBOARD")
             return await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
         if action == "streaks":
             rows = await interaction.client.db.list_flag_players_top_streak(interaction.guild.id, limit=10)
@@ -97,7 +106,8 @@ class FlagDashboardPersistentView(discord.ui.View):
         self.add_item(FlagDashboardButton("easy"))
         self.add_item(FlagDashboardButton("daily"))
         self.add_item(FlagDashboardButton("bet"))
-        self.add_item(FlagDashboardButton("leaderboard"))
+        self.add_item(FlagDashboardButton("leaderboard_weekly"))
+        self.add_item(FlagDashboardButton("leaderboard_monthly"))
         self.add_item(FlagDashboardButton("streaks"))
 
 

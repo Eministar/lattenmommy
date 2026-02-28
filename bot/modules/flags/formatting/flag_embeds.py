@@ -39,7 +39,8 @@ def build_dashboard_view(settings, guild: discord.Guild | None, stats: dict, but
         f"┏`👥` - Spieler: **{int(stats.get('players', 0))}**\n"
         f"┣`🎮` - Runden: **{int(stats.get('rounds', 0))}**\n"
         f"┣`🔥` - Beste Streak: **{int(stats.get('best_streak', 0))}**\n"
-        f"┗`🥇` - Leader: {stats.get('leader', 'Noch kein Eintrag')}"
+        f"┣`🏆` - Woche: {stats.get('weekly_leader', 'Noch kein Eintrag')}\n"
+        f"┗`🥇` - Monat: {stats.get('monthly_leader', 'Noch kein Eintrag')}"
     )
     container = discord.ui.Container(accent_colour=_color(settings, guild))
     _add_banner(container)
@@ -138,10 +139,10 @@ def build_result_embed(
     return emb
 
 
-def build_leaderboard_embed(settings, guild: discord.Guild, rows: list[tuple]) -> discord.Embed:
+def build_leaderboard_embed(settings, guild: discord.Guild, rows: list[tuple], title: str = "🏆 𑁉 LEADERBOARD") -> discord.Embed:
     if not rows:
         return discord.Embed(
-            title="🏆 𑁉 LEADERBOARD",
+            title=title,
             description="Noch keine Einträge.",
             color=_color(settings, guild),
         )
@@ -153,7 +154,7 @@ def build_leaderboard_embed(settings, guild: discord.Guild, rows: list[tuple]) -
         name = member.display_name if member else str(uid)
         lines.append(f"`#{i}` **{name}** — **{points}** Punkte")
     return discord.Embed(
-        title="🏆 𑁉 LEADERBOARD",
+        title=title,
         description="\n".join(lines),
         color=_color(settings, guild),
     )

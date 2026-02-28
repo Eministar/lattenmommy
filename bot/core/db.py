@@ -767,6 +767,10 @@ class Database:
             guild_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             total_points INTEGER NOT NULL DEFAULT 0,
+            weekly_points INTEGER NOT NULL DEFAULT 0,
+            weekly_key TEXT,
+            monthly_points INTEGER NOT NULL DEFAULT 0,
+            monthly_key TEXT,
             correct INTEGER NOT NULL DEFAULT 0,
             wrong INTEGER NOT NULL DEFAULT 0,
             current_streak INTEGER NOT NULL DEFAULT 0,
@@ -776,6 +780,7 @@ class Database:
             PRIMARY KEY (guild_id, user_id)
         );
         """)
+        await self._ensure_flag_quiz_columns()
         await self._conn.execute("""
         CREATE TABLE IF NOT EXISTS flag_quiz_flags (
             guild_id INTEGER NOT NULL,
@@ -856,6 +861,13 @@ class Database:
         await self._ensure_column("parliament_parties", "thread_info_message_id", "INTEGER")
         await self._ensure_column("parliament_parties", "party_role_id", "INTEGER")
         await self._ensure_parliament_party_bigint_columns()
+        await self._conn.commit()
+
+    async def _ensure_flag_quiz_columns(self):
+        await self._ensure_column("flag_quiz_players", "weekly_points", "INTEGER NOT NULL DEFAULT 0")
+        await self._ensure_column("flag_quiz_players", "weekly_key", "TEXT")
+        await self._ensure_column("flag_quiz_players", "monthly_points", "INTEGER NOT NULL DEFAULT 0")
+        await self._ensure_column("flag_quiz_players", "monthly_key", "TEXT")
         await self._conn.commit()
 
     async def _ensure_parliament_party_bigint_columns(self):
@@ -3251,7 +3263,20 @@ class Database:
     async def get_flag_player_stats(self, guild_id: int, user_id: int):
         cur = await self._conn.execute(
             """
-            SELECT guild_id, user_id, total_points, correct, wrong, current_streak, best_streak, last_daily, updated_at
+            SELECT
+                guild_id,
+                user_id,
+                total_points,
+                weekly_points,
+                weekly_key,
+                monthly_points,
+                monthly_key,
+                correct,
+                wrong,
+                current_streak,
+                best_streak,
+                last_daily,
+                updated_at
             FROM flag_quiz_players
             WHERE guild_id = ? AND user_id = ?
             LIMIT 1;
@@ -3265,6 +3290,10 @@ class Database:
         guild_id: int,
         user_id: int,
         total_points: int,
+        weekly_points: int,
+        weekly_key: str | None,
+        monthly_points: int,
+        monthly_key: str | None,
         correct: int,
         wrong: int,
         current_streak: int,
@@ -3275,11 +3304,27 @@ class Database:
         await self._conn.execute(
             """
             INSERT INTO flag_quiz_players (
-                guild_id, user_id, total_points, correct, wrong, current_streak, best_streak, last_daily, updated_at
+                guild_id,
+                user_id,
+                total_points,
+                weekly_points,
+                weekly_key,
+                monthly_points,
+                monthly_key,
+                correct,
+                wrong,
+                current_streak,
+                best_streak,
+                last_daily,
+                updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id, user_id) DO UPDATE SET
                 total_points = excluded.total_points,
+                weekly_points = excluded.weekly_points,
+                weekly_key = excluded.weekly_key,
+                monthly_points = excluded.monthly_points,
+                monthly_key = excluded.monthly_key,
                 correct = excluded.correct,
                 wrong = excluded.wrong,
                 current_streak = excluded.current_streak,
@@ -3291,6 +3336,10 @@ class Database:
                 int(guild_id),
                 int(user_id),
                 int(total_points),
+                int(weekly_points),
+                str(weekly_key) if weekly_key else None,
+                int(monthly_points),
+                str(monthly_key) if monthly_key else None,
                 int(correct),
                 int(wrong),
                 int(current_streak),
@@ -3301,16 +3350,41 @@ class Database:
         )
         await self._conn.commit()
 
-    async def list_flag_players_top_points(self, guild_id: int, limit: int = 10):
+    async def list_flag_players_top_points_weekly(self, guild_id: int, week_key: str, limit: int = 10):
         cur = await self._conn.execute(
             """
-            SELECT user_id, total_points, correct, wrong, current_streak, best_streak
+            SELECT
+                user_id,
+                weekly_points AS points,
+                correct,
+                wrong,
+                current_streak,
+                best_streak
             FROM flag_quiz_players
-            WHERE guild_id = ?
-            ORDER BY total_points DESC, correct DESC, updated_at ASC
+            WHERE guild_id = ? AND weekly_key = ? AND weekly_points > 0
+            ORDER BY points DESC, correct DESC, updated_at ASC
             LIMIT ?;
             """,
-            (int(guild_id), int(limit)),
+            (int(guild_id), str(week_key), int(limit)),
+        )
+        return await cur.fetchall()
+
+    async def list_flag_players_top_points_monthly(self, guild_id: int, month_key: str, limit: int = 10):
+        cur = await self._conn.execute(
+            """
+            SELECT
+                user_id,
+                monthly_points AS points,
+                correct,
+                wrong,
+                current_streak,
+                best_streak
+            FROM flag_quiz_players
+            WHERE guild_id = ? AND monthly_key = ? AND monthly_points > 0
+            ORDER BY points DESC, correct DESC, updated_at ASC
+            LIMIT ?;
+            """,
+            (int(guild_id), str(month_key), int(limit)),
         )
         return await cur.fetchall()
 

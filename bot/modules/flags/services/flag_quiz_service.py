@@ -92,6 +92,25 @@ class FlagQuizService:
         self._recent_codes_by_guild: dict[int, list[str]] = {}
         self._resolve_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
 
+    def _period_keys(self, now: datetime | None = None) -> tuple[str, str]:
+        stamp = now or datetime.now(timezone.utc)
+        iso = stamp.isocalendar()
+        week_key = f"{int(iso.year):04d}-W{int(iso.week):02d}"
+        month_key = f"{int(stamp.year):04d}-{int(stamp.month):02d}"
+        return week_key, month_key
+
+    def current_period_keys(self) -> tuple[str, str]:
+        return self._period_keys()
+
+    def _apply_period_rollover(self, stats: dict[str, Any], now: datetime | None = None):
+        week_key, month_key = self._period_keys(now)
+        if str(stats.get("weekly_key") or "") != week_key:
+            stats["weekly_key"] = week_key
+            stats["weekly_points"] = 0
+        if str(stats.get("monthly_key") or "") != month_key:
+            stats["monthly_key"] = month_key
+            stats["monthly_points"] = 0
+
     def _enabled(self, guild_id: int) -> bool:
         try:
             return bool(self.settings.get_guild_bool(int(guild_id), "flags.enabled", True))
@@ -172,29 +191,44 @@ class FlagQuizService:
 
     async def _get_player_stats(self, guild_id: int, user_id: int) -> dict[str, Any]:
         row = await self.db.get_flag_player_stats(int(guild_id), int(user_id))
+        week_key, month_key = self._period_keys()
         if not row:
             return {
                 "total_points": 0,
+                "weekly_points": 0,
+                "weekly_key": week_key,
+                "monthly_points": 0,
+                "monthly_key": month_key,
                 "correct": 0,
                 "wrong": 0,
                 "current_streak": 0,
                 "best_streak": 0,
                 "last_daily": None,
             }
-        return {
+        stats = {
             "total_points": int(row[2] or 0),
-            "correct": int(row[3] or 0),
-            "wrong": int(row[4] or 0),
-            "current_streak": int(row[5] or 0),
-            "best_streak": int(row[6] or 0),
-            "last_daily": str(row[7]) if row[7] else None,
+            "weekly_points": int(row[3] or 0),
+            "weekly_key": str(row[4] or ""),
+            "monthly_points": int(row[5] or 0),
+            "monthly_key": str(row[6] or ""),
+            "correct": int(row[7] or 0),
+            "wrong": int(row[8] or 0),
+            "current_streak": int(row[9] or 0),
+            "best_streak": int(row[10] or 0),
+            "last_daily": str(row[11]) if row[11] else None,
         }
+        self._apply_period_rollover(stats)
+        return stats
 
     async def _save_player_stats(self, guild_id: int, user_id: int, stats: dict[str, Any]):
         await self.db.upsert_flag_player_stats(
             int(guild_id),
             int(user_id),
             int(stats["total_points"]),
+            int(stats["weekly_points"]),
+            str(stats.get("weekly_key") or ""),
+            int(stats["monthly_points"]),
+            str(stats.get("monthly_key") or ""),
             int(stats["correct"]),
             int(stats["wrong"]),
             int(stats["current_streak"]),
@@ -314,17 +348,31 @@ class FlagQuizService:
         return {x for x in out if x}
 
     async def _dashboard_stats(self, guild: discord.Guild) -> dict[str, Any]:
-        top = await self.db.list_flag_players_top_points(guild.id, limit=1)
-        leader = "Noch kein Eintrag"
-        if top:
-            uid = int(top[0][0])
-            points = int(top[0][1] or 0)
+        week_key, month_key = self._period_keys()
+        top_week = await self.db.list_flag_players_top_points_weekly(guild.id, week_key, limit=1)
+        top_month = await self.db.list_flag_players_top_points_monthly(guild.id, month_key, limit=1)
+        weekly_leader = "Noch kein Eintrag"
+        monthly_leader = "Noch kein Eintrag"
+        if top_week:
+            uid = int(top_week[0][0])
+            points = int(top_week[0][1] or 0)
             member = guild.get_member(uid)
-            leader = f"**{member.display_name if member else uid}** ({points} Punkte)"
+            weekly_leader = f"**{member.display_name if member else uid}** ({points} Punkte)"
+        if top_month:
+            uid = int(top_month[0][0])
+            points = int(top_month[0][1] or 0)
+            member = guild.get_member(uid)
+            monthly_leader = f"**{member.display_name if member else uid}** ({points} Punkte)"
         players = await self.db.count_flag_players(guild.id)
         rounds = await self.db.sum_flag_rounds(guild.id)
         best_streak = await self.db.best_flag_streak(guild.id)
-        return {"players": int(players), "rounds": int(rounds), "best_streak": int(best_streak), "leader": leader}
+        return {
+            "players": int(players),
+            "rounds": int(rounds),
+            "best_streak": int(best_streak),
+            "weekly_leader": weekly_leader,
+            "monthly_leader": monthly_leader,
+        }
 
     async def sync_king_role(self, guild: discord.Guild):
         role_id = int(self.settings.get_guild_int(guild.id, "flags.king_role_id", 0) or 0)
@@ -335,7 +383,8 @@ class FlagQuizService:
             return
 
         leader_id = 0
-        rows = await self.db.list_flag_players_top_points(guild.id, limit=1)
+        week_key, _ = self._period_keys()
+        rows = await self.db.list_flag_players_top_points_weekly(guild.id, week_key, limit=1)
         if rows:
             leader_id = int(rows[0][0] or 0)
         if not leader_id:
@@ -444,7 +493,8 @@ class FlagQuizService:
             FlagDashboardButton("easy"),
             FlagDashboardButton("daily"),
             FlagDashboardButton("bet"),
-            FlagDashboardButton("leaderboard"),
+            FlagDashboardButton("leaderboard_weekly"),
+            FlagDashboardButton("leaderboard_monthly"),
             FlagDashboardButton("streaks"),
         ]
         return build_dashboard_view(self.settings, guild, stats, buttons)
@@ -491,9 +541,12 @@ class FlagQuizService:
             if wager > max_wager:
                 return False, f"Maximaler Einsatz ist **{max_wager}** Punkte."
             ps = await self._get_player_stats(guild.id, user.id)
+            self._apply_period_rollover(ps)
             if int(ps["total_points"]) < wager:
                 return False, f"Du hast nicht genug Punkte. Verfügbar: {int(ps['total_points'])}."
             ps["total_points"] -= wager
+            ps["weekly_points"] -= wager
+            ps["monthly_points"] -= wager
             await self._save_player_stats(guild.id, user.id, ps)
         if mode_key == "daily":
             ps = await self._get_player_stats(guild.id, user.id)
@@ -572,6 +625,7 @@ class FlagQuizService:
             if not claimed:
                 return
             ps = await self._get_player_stats(guild.id, user.id)
+            self._apply_period_rollover(ps)
             ps["wrong"] += 1
             ps["current_streak"] = 0
             await self._save_player_stats(guild.id, user.id, ps)
@@ -674,6 +728,7 @@ class FlagQuizService:
         except Exception:
             pass
         ps = await self._get_player_stats(guild.id, int(user.id))
+        self._apply_period_rollover(ps)
         name = self._name_for(round_.code)
         if correct:
             if round_.mode == "daily":
@@ -687,6 +742,8 @@ class FlagQuizService:
             if round_.mode != "bet":
                 gain = min(int(gain), self._max_gain_per_round(guild.id))
             ps["total_points"] += gain
+            ps["weekly_points"] += gain
+            ps["monthly_points"] += gain
             ps["correct"] += 1
             ps["current_streak"] += 1
             ps["best_streak"] = max(int(ps["best_streak"]), int(ps["current_streak"]))
@@ -775,8 +832,12 @@ class FlagQuizService:
             except Exception:
                 pass
 
-    async def leaderboard_text(self, guild: discord.Guild, limit: int = 10) -> str:
-        rows = await self.db.list_flag_players_top_points(guild.id, limit=limit)
+    async def leaderboard_text(self, guild: discord.Guild, period: str = "weekly", limit: int = 10) -> str:
+        week_key, month_key = self._period_keys()
+        if str(period).lower() == "monthly":
+            rows = await self.db.list_flag_players_top_points_monthly(guild.id, month_key, limit=limit)
+        else:
+            rows = await self.db.list_flag_players_top_points_weekly(guild.id, week_key, limit=limit)
         if not rows:
             return "Noch keine Einträge."
         lines = []

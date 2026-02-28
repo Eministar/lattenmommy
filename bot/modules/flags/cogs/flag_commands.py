@@ -85,12 +85,25 @@ class FlagCommands(commands.Cog):
         ok, msg = await self.service.start_round(interaction.guild, interaction.channel, interaction.user, "daily")
         await interaction.response.send_message(msg, ephemeral=True, delete_after=30)
 
-    @flag.command(name="leaderboard", description="🏆 𑁉 Top-Spieler")
-    async def leaderboard(self, interaction: discord.Interaction):
+    @flag.command(name="leaderboard", description="🏆 𑁉 Top-Spieler (Woche/Monat)")
+    @app_commands.describe(zeitraum="Woche oder Monat")
+    @app_commands.choices(zeitraum=[
+        app_commands.Choice(name="weekly", value="weekly"),
+        app_commands.Choice(name="monthly", value="monthly"),
+    ])
+    async def leaderboard(self, interaction: discord.Interaction, zeitraum: app_commands.Choice[str] | None = None):
         if not interaction.guild:
             return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True, delete_after=30)
-        rows = await self.bot.db.list_flag_players_top_points(interaction.guild.id, limit=10)
-        emb = build_leaderboard_embed(self.bot.settings, interaction.guild, rows)
+        if not self.service:
+            return await interaction.response.send_message("Flag-Service nicht verfügbar.", ephemeral=True, delete_after=30)
+        period = str(zeitraum.value if zeitraum else "weekly").lower()
+        week_key, month_key = self.service.current_period_keys()
+        if period == "monthly":
+            rows = await self.bot.db.list_flag_players_top_points_monthly(interaction.guild.id, month_key, limit=10)
+            emb = build_leaderboard_embed(self.bot.settings, interaction.guild, rows, title="🥇 𑁉 MONATS-LEADERBOARD")
+        else:
+            rows = await self.bot.db.list_flag_players_top_points_weekly(interaction.guild.id, week_key, limit=10)
+            emb = build_leaderboard_embed(self.bot.settings, interaction.guild, rows, title="🏆 𑁉 WOCHEN-LEADERBOARD")
         await interaction.response.send_message(embed=emb, ephemeral=True, delete_after=30)
 
     @flag.command(name="streaks", description="🔥 𑁉 Top-Streaks")
@@ -111,6 +124,7 @@ class FlagCommands(commands.Cog):
         text = (
             f"**Stats von {target.display_name}**\n"
             f"Punkte: **{int(stats['total_points'])}**\n"
+            f"Woche: **{int(stats['weekly_points'])}** • Monat: **{int(stats['monthly_points'])}**\n"
             f"Richtig: **{int(stats['correct'])}** • Falsch: **{int(stats['wrong'])}**\n"
             f"Streak: **{int(stats['current_streak'])}** (Best: {int(stats['best_streak'])})"
         )
