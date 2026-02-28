@@ -571,6 +571,29 @@ class ParliamentService:
             fetched = None
         return fetched if isinstance(fetched, discord.Thread) else None
 
+    async def _ensure_party_forum_thread(self, guild: discord.Guild, party_row) -> discord.Thread | None:
+        party = self._party_data(party_row)
+        if not party:
+            return None
+        thread_id = int(party.get("forum_thread_id") or 0)
+        if thread_id:
+            existing = await self._get_party_thread(guild, thread_id)
+            if existing:
+                return existing
+        forum = await self._get_forum_channel(guild)
+        if not forum:
+            return None
+        try:
+            thread_result = await forum.create_thread(
+                name=f"🏛️ {party['name']}"[:100],
+                content=f"Öffentlicher Parteithread: **{party['name']}**",
+            )
+            thread = thread_result.thread
+            await self.db.set_parliament_party_forum_thread(int(party["id"]), int(thread.id))
+            return thread
+        except Exception:
+            return None
+
     def _party_overwrites(
         self,
         guild: discord.Guild,
@@ -800,12 +823,13 @@ class ParliamentService:
 
     async def _sync_party_info_message(self, guild: discord.Guild, party_row):
         party = self._party_data(party_row)
-        thread_id = int(party["forum_thread_id"])
-        if not thread_id:
-            return
-        thread = await self._get_party_thread(guild, thread_id)
+        thread = await self._ensure_party_forum_thread(guild, party_row)
         if not thread:
             return
+        refreshed_party_row = await self.db.get_parliament_party(int(party["id"]))
+        if refreshed_party_row:
+            party_row = refreshed_party_row
+            party = self._party_data(refreshed_party_row)
         view = await self._build_party_info_view(guild, party_row)
         marker = f"starry:party:info:{int(party['id'])}"
         message_id = int(party["thread_info_message_id"])
@@ -1024,18 +1048,13 @@ class ParliamentService:
         if refreshed_after:
             await self._sync_party_role_members(interaction.guild, refreshed_after)
 
-        forum = await self._get_forum_channel(interaction.guild)
-        if forum:
-            thread_result = await forum.create_thread(
-                name=f"🏛️ {party['name']}"[:100],
-                content=f"Öffentlicher Parteithread: **{party['name']}**",
-            )
-            thread = thread_result.thread
-            await self.db.set_parliament_party_forum_thread(int(party["id"]), int(thread.id))
-            refreshed = await self.db.get_parliament_party(int(party["id"]))
-            if refreshed:
-                await self._sync_party_info_message(interaction.guild, refreshed)
-        await self._send_ephemeral(interaction, f"Partei **#{party_id} {party['name']}** wurde genehmigt.")
+        refreshed = await self.db.get_parliament_party(int(party["id"])) or party_row
+        await self._sync_party_info_message(interaction.guild, refreshed)
+        forum_ok = await self._get_forum_channel(interaction.guild)
+        note = ""
+        if not forum_ok:
+            note = "\nHinweis: Kein Parteien-Forum konfiguriert, daher wurde noch kein öffentlicher Parteithread erstellt."
+        await self._send_ephemeral(interaction, f"Partei **#{party_id} {party['name']}** wurde genehmigt.{note}")
 
     async def reject_party(self, interaction: discord.Interaction, party_id: int, reason: str | None = None):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
@@ -1243,12 +1262,14 @@ class ParliamentService:
 
         existing_attachments_json = str(party[9] or "").strip() or None
         await self.db.set_parliament_party_manifesto(int(party[0]), text[:4000], attachments_json=existing_attachments_json)
-        thread_id = int(party[10] or 0)
-        if not interaction.guild or not thread_id:
-            return await interaction.response.send_message("Parteithread ist nicht konfiguriert.", ephemeral=True)
-        thread = await self._get_party_thread(interaction.guild, thread_id)
+        if not interaction.guild:
+            return await interaction.response.send_message("Nur im Server nutzbar.", ephemeral=True)
+        thread = await self._ensure_party_forum_thread(interaction.guild, party)
         if not thread:
-            return await interaction.response.send_message("Parteithread nicht gefunden.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Parteithread nicht verfügbar. Bitte Parteien-Forum konfigurieren und erneut versuchen.",
+                ephemeral=True,
+            )
         try:
             await thread.edit(archived=False, locked=False)
         except Exception:
@@ -1303,9 +1324,7 @@ class ParliamentService:
             return
         attachments_json = json.dumps(attachment_urls, ensure_ascii=False) if attachment_urls else None
         await self.db.set_parliament_party_manifesto(int(party_row[0]), text[:4000] if text else None, attachments_json=attachments_json)
-        party = self._party_data(party_row)
-        thread_id = int(party["forum_thread_id"] or 0)
-        thread = await self._get_party_thread(message.guild, thread_id) if thread_id else None
+        thread = await self._ensure_party_forum_thread(message.guild, party_row)
         if thread:
             lines = [f"📜 **Programm-Update von {message.author.mention}**"]
             if text:
